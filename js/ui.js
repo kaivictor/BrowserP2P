@@ -1,5 +1,5 @@
 // ui.js —— 事件绑定 / 角色流程 / 初始化（最后加载，依赖前面所有脚本）
-log('[ui.js] 已加载 v=58', 'info'); // 自证：日志首行显示此版本，说明手机跑的是新版；若看不到这行=旧缓存
+logT('监看', '[ui.js] 已加载 v=60', 'info'); // 自证：日志首行显示此版本，说明手机跑的是新版；若看不到这行=旧缓存
 
 function startAsOfferer() {
   role = 'offerer';
@@ -7,8 +7,8 @@ function startAsOfferer() {
   offererView.classList.remove('hidden');
   answererView.classList.add('hidden');
   setBadge('等待对方', 'pending');
-  log('正在生成会话码…', 'info');
-  createOffer().then(() => log('会话码已生成，请发给对方。', 'ok')).catch((e) => log('生成失败：' + e.message, 'err'));
+  logT('信令', '正在生成会话码…', 'info');
+  createOffer().then(() => logT('信令', '会话码已生成，请发给对方。', 'ok')).catch((e) => logT('信令', '生成失败：' + e.message, 'err'));
 }
 function startAsAnswerer() {
   role = 'answerer';
@@ -16,18 +16,18 @@ function startAsAnswerer() {
   answererView.classList.remove('hidden');
   offererView.classList.add('hidden');
   setBadge('等待会话码', 'pending');
-  log('请在上方粘贴对方的会话码。', 'info');
+  logT('信令', '请在上方粘贴对方的会话码。', 'info');
 }
 async function handleProcessOffer() {
   const code = offerIn.value.trim();
   if (!code) { alert('请先粘贴或扫描对方的会话码。'); return; }
-  try { await processOffer(code); log('应答码已生成，请发回给对方。', 'ok'); }
-  catch (e) { log('处理会话码失败：' + e.message, 'err'); }
+  try { await processOffer(code); logT('信令', '应答码已生成，请发回给对方。', 'ok'); }
+  catch (e) { logT('信令', '处理会话码失败：' + e.message, 'err'); }
 }
 async function handleSetAnswer() {
   const code = answerIn.value.trim();
   if (!code) { alert('请先粘贴或扫描对方的应答码。'); return; }
-  processAnswer(code).catch((e) => log('连接失败：' + e.message, 'err'));
+  processAnswer(code).catch((e) => logT('信令', '连接失败：' + e.message, 'err'));
 }
 function disconnect() {
   try { if (dc) dc.close(); } catch (e) {}
@@ -47,11 +47,11 @@ function disconnect() {
   try { screenWatchVideo.pause(); screenWatchVideo.srcObject = null; } catch (e) {} // 清空残留画面，避免下次连接显示冻结/黑帧
   goPage('page-role');
   if (typeof refreshConnectedNav === 'function') refreshConnectedNav();
-  log('已断开连接。', 'warn');
+  logT('信令', '已断开连接。', 'warn');
 }
 function clearChat() {
   chatMessages.innerHTML = ''; chatBytes = 0; updateChatCap();
-  log('已清空聊天与传输记录显示。', 'info');
+  logT('UI', '已清空聊天与传输记录显示。', 'info');
 }
 
 function initUI() {
@@ -61,7 +61,7 @@ function initUI() {
   }
   if (!hasFSAccess) {
     streamingMode = false;
-    log('当前浏览器不支持 File System Access API（需 Chrome/Edge 且 HTTPS/localhost），大文件将退回“内存拼装后下载”，可能内存溢出。', 'warn');
+    logT('UI', '当前浏览器不支持 File System Access API（需 Chrome/Edge 且 HTTPS/localhost），大文件将退回“内存拼装后下载”，可能内存溢出。', 'warn');
   }
 
   bindBackButtons();
@@ -99,23 +99,23 @@ function initUI() {
   chatDrop.addEventListener('drop', (e) => { const files = e.dataTransfer && e.dataTransfer.files; if (files && files.length) sendFiles(files); });
 
   // 聊天
-  chatSend.addEventListener('click', () => sendText().catch((e) => log('发送失败：' + e.message, 'err')));
-  chatInput.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendText().catch((e) => log('发送失败：' + e.message, 'err')); } });
-  chatMic.addEventListener('click', () => { if (recording) stopVoice(); else startVoice().catch((e) => log('录音启动失败：' + e.message, 'err')); });
+  chatSend.addEventListener('click', () => sendText().catch((e) => logT('UI', '发送失败：' + e.message, 'err')));
+  chatInput.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendText().catch((e) => logT('UI', '发送失败：' + e.message, 'err')); } });
+  chatMic.addEventListener('click', () => { if (recording) stopVoice(); else startVoice().catch((e) => logT('UI', '录音启动失败：' + e.message, 'err')); });
   if (!voiceSupported && !wavSupported) { chatMic.disabled = true; chatMic.title = '当前浏览器不支持语音录制'; chatMic.classList.add('disabled'); chatMic.textContent = '🎤 录音(不支持)'; }
   btnClearChat.addEventListener('click', clearChat);
 
   // 通话
-  callStart.addEventListener('click', () => initiateCall().catch((e) => log('通话启动失败：' + e.message, 'err')));
-  callJoin.addEventListener('click', () => joinCall().catch((e) => log('加入失败：' + e.message, 'err')));
+  callStart.addEventListener('click', () => initiateCall().catch((e) => logT('UI', '通话启动失败：' + e.message, 'err')));
+  callJoin.addEventListener('click', () => joinCall().catch((e) => logT('UI', '加入失败：' + e.message, 'err')));
   callReject.addEventListener('click', rejectCall);
   callMute.addEventListener('click', toggleMute);
   callMicMute.addEventListener('click', toggleMicMute);
   callEnd.addEventListener('click', endCall);
 
   // 屏幕监看
-  screenStart.addEventListener('click', () => startScreenShare().catch((e) => log('屏幕共享失败：' + e.message, 'err')));
-  screenStop.addEventListener('click', () => stopScreenShare().catch((e) => log('停止共享失败：' + e.message, 'err')));
+  screenStart.addEventListener('click', () => startScreenShare().catch((e) => logT('UI', '屏幕共享失败：' + e.message, 'err')));
+  screenStop.addEventListener('click', () => stopScreenShare().catch((e) => logT('UI', '停止共享失败：' + e.message, 'err')));
   screenFps.addEventListener('change', () => {
     const isCustom = screenFps.value === 'custom';
     screenFpsCustom.classList.toggle('hidden', !isCustom);
@@ -129,7 +129,7 @@ function initUI() {
   });
   // 监看端分辨率/缩放变化：防抖上报发送端，自适应下发分辨率（szWatchInfoTimer/szLastWatchSent 已提到文件顶层声明，供 szZoomAt/szTouchEnd 共用）
   window.addEventListener('resize', () => { clearTimeout(szWatchInfoTimer); szWatchInfoTimer = setTimeout(() => { if (typeof sendWatchInfo === 'function') sendWatchInfo(); }, 400); });
-  btnPreShare.addEventListener('click', () => pickScreenBeforeConnect().catch((e) => log('预选屏幕失败：' + e.message, 'err')));
+  btnPreShare.addEventListener('click', () => pickScreenBeforeConnect().catch((e) => logT('UI', '预选屏幕失败：' + e.message, 'err')));
 
   // 屏幕监看：全屏（竖屏 / 横屏）/ 退出
   screenFsPortrait.addEventListener('click', () => enterScreenFs('portrait'));
@@ -156,7 +156,7 @@ function initUI() {
 
   preRequestCamera();
   updateChatCap();
-  log('就绪。请选择角色开始。安全上下文：' + (hasSubtle ? '是（AES-GCM 可用）' : '否（AES-GCM 不可用，传输仍 DTLS-SRTP 加密）'), 'info');
+  logT('UI', '就绪。请选择角色开始。安全上下文：' + (hasSubtle ? '是（AES-GCM 可用）' : '否（AES-GCM 不可用，传输仍 DTLS-SRTP 加密）'), 'info');
 }
 
 // ---------- 屏幕监看全屏 ----------
@@ -177,7 +177,7 @@ function enterScreenFs(mode) {
       screen.orientation.lock(mode === 'landscape' ? 'landscape-primary' : 'portrait-primary').catch(() => {});
     }
     if (typeof sendWatchInfo === 'function') sendWatchInfo(); // 全屏后按监看屏分辨率自适应下发
-  }).catch((e) => log('无法进入全屏：' + e.message, 'warn'));
+  }).catch((e) => logT('全屏', '无法进入全屏：' + e.message, 'warn'));
 }
 function exitScreenFs() { fsExit().catch(() => {}); }
 function syncScreenFsButtons() {
@@ -190,6 +190,12 @@ function syncScreenFsButtons() {
 
 // ---------- 屏幕监看：缩放 / 平移（Ctrl+滚轮、双指捏合、拖拽） ----------
 let szScale = 1, szTx = 0, szTy = 0;
+// Canvas 裁切（发送端勾选控制；监看端仅做显示）
+let szCropEnabled = false;  // 复选框：发送端是否启用 Canvas 裁切传输（仅传监看端放大的局部）
+let szCropRxActive = false; // 接收侧：发送端是否正在裁切传输（收到 screen-crop 置位；置位后本地按 fit 显示，避免二次放大）
+let szSrcW = 0, szSrcH = 0; // 全屏源分辨率缓存：把缩放/平移换算成裁切矩形用（裁切态不能取视频实际宽高，因为那已是局部）
+const szCropChk = document.getElementById('szCropChk');
+const szCropRow = document.getElementById('szCropRow');
 let szWatchInfoTimer = null, szLastWatchSent = 0; // 必须在顶层声明：szZoomAt/szTouchEnd 是顶层函数，访问不到 initUI 内部的 let
 let szLastScaleLogT = 0; // 监看端缩放日志节流：每 500ms 最多打一条，避免捏合时刷屏
 let szPanning = null; // 鼠标 / 单指拖拽平移状态
@@ -198,15 +204,49 @@ let szPinchEndedAt = 0; // 捏合结束时刻：结束后短时间内忽略单�
 function szPinchJustEnded() { return Date.now() - szPinchEndedAt < 300; }
 function szApply() {
   screenWatchVideo.style.transformOrigin = '0 0';
-  screenWatchVideo.style.transform = 'translate(' + szTx + 'px,' + szTy + 'px) scale(' + szScale + ')';
+  if (szCropRxActive) {
+    // 发送端正在裁切传输局部，收到的本就是局部画面：按原始比例铺满即可，绝不再做本地放大（否则二次放大）
+    screenWatchVideo.style.transform = 'none';
+  } else {
+    screenWatchVideo.style.transform = 'translate(' + szTx + 'px,' + szTy + 'px) scale(' + szScale + ')';
+  }
   screenFsReset.classList.toggle('hidden', szScale <= 1);
+  // 仅在非裁切态记录全屏源分辨率（裁切态视频实际宽高已是局部，不能用作换算基准）
+  if (!szCropRxActive && screenWatchVideo.videoWidth) { szSrcW = screenWatchVideo.videoWidth; szSrcH = screenWatchVideo.videoHeight; }
 }
+// 由当前缩放/平移算出“全屏源归一化矩形”：发给发送端用于 Canvas 裁切。
+// 仅在 szScale>1（已放大查看局部）时有意义，否则返回 null（发送端按全屏传）。
+function szGetCropRect() {
+  if (szScale <= 1) return null;
+  const cw = screenWatchStage.clientWidth, ch = screenWatchStage.clientHeight;
+  // 非裁切态：直接读视频实际宽高（实时、可靠，避免缓存 szSrcW 未就绪导致永远算不出矩形）；
+  // 裁切态：收到的已是局部画面，videoWidth 不再是全屏，必须用缓存的全屏分辨率 szSrcW/szSrcH。
+  const srcW = szCropRxActive ? szSrcW : (screenWatchVideo.videoWidth || szSrcW);
+  const srcH = szCropRxActive ? szSrcH : (screenWatchVideo.videoHeight || szSrcH);
+  if (!srcW || !srcH || !cw || !ch) return null;
+  // object-fit: fill 基矩形（引入 Canvas 前默认即 fill：内容铺满舞台，无 letterbox 偏移，bx=by=0）
+  const dw = cw, dh = ch;
+  const bx = 0, by = 0;
+  // 逆变换：舞台坐标 → 元素局部 → 源归一（transform=translate(szTx,szTy) scale(szScale), origin 0,0）
+  const l0x = (0 - szTx) / szScale, l1x = (cw - szTx) / szScale;
+  const l0y = (0 - szTy) / szScale, l1y = (ch - szTy) / szScale;
+  let x = ((Math.min(l0x, l1x) - bx) / dw);
+  let y = ((Math.min(l0y, l1y) - by) / dh);
+  let w = ((Math.max(l0x, l1x) - bx) / dw) - x;
+  let h = ((Math.max(l0y, l1y) - by) / dh) - y;
+  x = Math.min(1, Math.max(0, x)); y = Math.min(1, Math.max(0, y));
+  w = Math.min(1 - x, Math.max(0.05, w)); h = Math.min(1 - y, Math.max(0.05, h));
+  return { x: +x.toFixed(4), y: +y.toFixed(4), w: +w.toFixed(4), h: +h.toFixed(4) };
+}
+// 接收侧：发送端告知“我正在/已停止裁切”。置位后本地按 fit 显示，避免二次放大。
+function szSetCropRx(on) { szCropRxActive = !!on; szApply(); }
 function szReset() { szScale = 1; szTx = 0; szTy = 0; szApply(); if (typeof sendWatchInfo === 'function') sendWatchInfo(); }
 function szClamp(s) { return Math.min(8, Math.max(1, s)); }
 // 平移钳制：让缩放后的视频框始终覆盖舞台（scale=1 时强制 tx=ty=0 居中），
 // 既避免把画面拖飞，也消除“捏合缩小回 scale=1 却残留偏移→卡在左上角”的问题。
 function szClampPan() {
-  if (!(document.fullscreenElement === screenWatchStage || document.webkitFullscreenElement === screenWatchStage)) return;
+  // 普通页面态与全屏态都钳制：放大后始终让视频盖住舞台。
+  // 左移时右边不离开右边界(szTx >= 宽-sw)、右移时左边不离开左边界(szTx <= 0)，上下同理，防止拖出空白。
   const r = screenWatchStage.getBoundingClientRect();
   const sw = r.width * szScale, sh = r.height * szScale;
   szTx = Math.min(0, Math.max(r.width - sw, szTx));
@@ -221,12 +261,19 @@ function szZoomAt(clientX, clientY, factor) {
   szTx += (clientX - r.left) * (1 - ns / szScale);
   szTy += (clientY - r.top) * (1 - ns / szScale);
   szScale = ns; szClampPan(); szApply();
-  if (Date.now() - szLastScaleLogT >= 500) { szLastScaleLogT = Date.now(); log('监看端缩放 szScale → ' + szScale.toFixed(2), 'info'); }
+  if (Date.now() - szLastScaleLogT >= 500) { szLastScaleLogT = Date.now(); logT('Canvas裁切', '监看端缩放 szScale → ' + szScale.toFixed(2), 'info'); }
   if (typeof sendWatchInfo === 'function') {
     const now = Date.now(), minGap = 300;
     if (now - szLastWatchSent >= minGap) { szLastWatchSent = now; sendWatchInfo(szScale); } // 捏合中：每 300ms 领先上报，边捏边变清晰
     else { clearTimeout(szWatchInfoTimer); szWatchInfoTimer = setTimeout(() => { szLastWatchSent = Date.now(); sendWatchInfo(szScale); }, minGap - (now - szLastWatchSent)); } //  trailing：停手前补最后一次
   }
+}
+// 平移中按节流重新上报：仅平移（szScale 不变）也会改变放大局部，必须重新发送 crop，发送端才能更新裁切区域
+function szReportPanThrottled() {
+  if (typeof sendWatchInfo !== 'function') return;
+  const now = Date.now(), minGap = 200;
+  if (now - szLastWatchSent >= minGap) { szLastWatchSent = now; sendWatchInfo(); }
+  else { clearTimeout(szWatchInfoTimer); szWatchInfoTimer = setTimeout(() => { szLastWatchSent = Date.now(); sendWatchInfo(); }, minGap - (now - szLastWatchSent)); }
 }
 function szPinchInfo(e) {
   const ax = e.touches[0].clientX, ay = e.touches[0].clientY;
@@ -252,8 +299,9 @@ window.addEventListener('mousemove', (e) => {
   szTx = szPanning.tx + (e.clientX - szPanning.x);
   szTy = szPanning.ty + (e.clientY - szPanning.y);
   szClampPan(); szApply();
+  szReportPanThrottled(); // 平移中节流上报新局部，发送端实时更新裁切
 });
-window.addEventListener('mouseup', () => { szPanning = null; });
+window.addEventListener('mouseup', () => { if (szPanning) { szPanning = null; if (typeof sendWatchInfo === 'function') sendWatchInfo(); } });
 // 触摸：双指捏合缩放（捏合中点即平移焦点）+ 单指拖拽平移
 screenWatchStage.addEventListener('touchstart', (e) => {
   if (e.target.closest('button')) return;
@@ -278,6 +326,7 @@ screenWatchStage.addEventListener('touchmove', (e) => {
     szTx = szPanning.tx + (e.touches[0].clientX - szPanning.x);
     szTy = szPanning.ty + (e.touches[0].clientY - szPanning.y);
     szClampPan(); szApply();
+    szReportPanThrottled(); // 单指平移中节流上报新局部
   }
 }, { passive: false });
 function szTouchEnd(e) {
@@ -296,6 +345,17 @@ screenWatchStage.addEventListener('dblclick', (e) => {
   szReset();
 });
 szReset(); // 初始化（隐藏复位按钮）
+
+// Canvas 裁切开关：发送端控制。勾选后，当监看端放大查看局部时，发送端用 Canvas 仅裁切该局部传输（更清晰）。
+// 监看端勾选本框无效（裁切由发送端决定）；切换时若正在共享且监看端已放大，立即让发送端重新评估（szEvaluateCrop 在 features.js，按 szAmSender 守卫）。
+if (szCropChk) {
+  szCropEnabled = szCropChk.checked;
+  szCropChk.addEventListener('change', () => {
+    szCropEnabled = szCropChk.checked;
+    logT('监看', 'Canvas 裁切开关=' + szCropEnabled, 'info');
+    if (typeof szEvaluateCrop === 'function') szEvaluateCrop();
+  });
+}
 
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initUI);
 else initUI();

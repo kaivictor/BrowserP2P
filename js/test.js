@@ -21,7 +21,7 @@ function toggleTestCam() {
       const t = stream.getVideoTracks()[0];
       testCamStatus.textContent = '摄像头已打开：' + (t ? t.label : '默认') + '。';
     })
-    .catch((e) => { log('打开摄像头失败：' + e.message, 'warn'); testCamStatus.textContent = '打开失败：' + e.message; });
+    .catch((e) => { logT('test', '打开摄像头失败：' + e.message, 'warn'); testCamStatus.textContent = '打开失败：' + e.message; });
 }
 
 // ---------- 麦克风（复刻 chat.startVoiceWav 的 Web Audio 路径）----------
@@ -37,7 +37,7 @@ function onTestMicBtn() {
   if (testMicState === 'idle') {
     ensureAudioUnlock(); // 手势内解锁音频会话
     testWavCtx = getAudioCtx();
-    if (!testWavCtx) { log('此浏览器不支持 Web Audio，无法录音。', 'warn'); return; }
+    if (!testWavCtx) { logT('test', '此浏览器不支持 Web Audio，无法录音。', 'warn'); return; }
     navigator.mediaDevices.getUserMedia({ audio: true })
       .then(async (stream) => {
         testMicStream = stream;
@@ -46,7 +46,7 @@ function onTestMicBtn() {
         // iOS 激活采集：把麦克风流挂到“静音播放”(audioPrimer muted=true)的媒体元素，
         // 与通话路径(一直正常)一致——这是本机(无 MediaRecorder)能采到真实声音的配置。
         if (typeof audioPrimer !== 'undefined' && audioPrimer) {
-          try { audioPrimer.srcObject = stream; audioPrimer.muted = true; const pp = audioPrimer.play(); if (pp && pp.catch) pp.catch((er) => log('primer 播放被拒: ' + er.message, 'warn')); } catch (e) {}
+          try { audioPrimer.srcObject = stream; audioPrimer.muted = true; const pp = audioPrimer.play(); if (pp && pp.catch) pp.catch((er) => logT('test', 'primer 播放被拒: ' + er.message, 'warn')); } catch (e) {}
         }
         if (testWavCtx.state === 'suspended') { try { await testWavCtx.resume(); } catch (e) {} }
         testWavSrc = testWavCtx.createMediaStreamSource(stream);
@@ -70,7 +70,7 @@ function onTestMicBtn() {
             testMicStatus.textContent = '诊断: track=' + (tr ? tr.readyState : '?') + ' ctx=' + testWavCtx.state + ' 帧=' + testRecFrames + ' 峰值=' + testWavPeak.toFixed(4) + (testRecFrames > 0 ? '（有数据✅）' : '（仍0帧，未激活❌）');
         }, 2000);
       })
-      .catch((e) => log('麦克风权限被拒绝：' + e.message, 'warn'));
+      .catch((e) => logT('test', '麦克风权限被拒绝：' + e.message, 'warn'));
   } else if (testMicState === 'recording') {
     testMicState = 'stopped';
     try { if (testWavNode) testWavNode.disconnect(); } catch (e) {}
@@ -96,7 +96,7 @@ function onTestMicBtn() {
     if (typeof getAudioCtx === 'function') { const c = getAudioCtx(); if (c && c.state === 'suspended') c.resume().catch(() => {}); }
     ensureAudioUnlock();
     testAudio.src = testMicUrl;
-    testAudio.play().catch((e) => log('播放失败：' + e.message, 'warn'));
+    testAudio.play().catch((e) => logT('test', '播放失败：' + e.message, 'warn'));
     testMicState = 'playing';
     testMicBtn.textContent = '⏹ 停止播放';
     testMicStatus.textContent = '播放中…';

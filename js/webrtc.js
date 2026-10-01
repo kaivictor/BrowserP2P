@@ -37,7 +37,7 @@ function waitIceComplete(connection, timeoutMs) {
 
 function onConnectionStateChange() {
   const s = pc.connectionState;
-  log('连接状态：' + s, s === 'connected' ? 'ok' : 'info');
+  logT('WebRTC', '连接状态：' + s, s === 'connected' ? 'ok' : 'info');
   // 连接建立后，若用户还开着二维码全屏，自动关闭
   if (s === 'connected') {
     const pair = getSelectedPair();
@@ -45,16 +45,16 @@ function onConnectionStateChange() {
       const r = pair.remote, l = pair.local;
       const ra = (r.ip != null ? r.ip : r.address), rp = r.port, rt = (r.type || r.candidateType);
       const la = (l && (l.ip != null ? l.ip : l.address)), lp = l && l.port, lt = (l && (l.type || l.candidateType));
-      log('连接成功，对端地址：' + ra + ':' + rp + '（' + rt + '） ← 本端 ' + la + ':' + lp + '（' + lt + '）', 'ok');
+      logT('WebRTC', '连接成功，对端地址：' + ra + ':' + rp + '（' + rt + '） ← 本端 ' + la + ':' + lp + '（' + lt + '）', 'ok');
     } else {
-      log('连接成功（已建立 DataChannel）。', 'ok');
+      logT('WebRTC', '连接成功（已建立 DataChannel）。', 'ok');
     }
     if (!qrFullscreen.classList.contains('hidden')) hideQRFullscreen();
     // 若身份页已“先选好要共享的屏幕”，连接建立后自动开始共享
     if (pendingScreenStream) {
       const ps = pendingScreenStream; pendingScreenStream = null;
       goPage('page-screen');
-      beginScreenShare(ps).catch((e) => log('连接后自动共享失败：' + e.message, 'err'));
+      beginScreenShare(ps).catch((e) => logT('WebRTC', '连接后自动共享失败：' + e.message, 'err'));
     }
   } else if (s === 'disconnected' || s === 'failed' || s === 'closed') {
     // 连接断开（对端离开/网络异常）：隐藏“进入功能中心”按钮
@@ -64,11 +64,11 @@ function onConnectionStateChange() {
 
 async function createOffer() {
   encryptionEnabled = encToggle.checked && hasSubtle;
-  if (encToggle.checked && !hasSubtle) log('当前非安全上下文，AES-GCM 不可用，已自动关闭加密。', 'warn');
+  if (encToggle.checked && !hasSubtle) logT('WebRTC', '当前非安全上下文，AES-GCM 不可用，已自动关闭加密。', 'warn');
   sessionFingerprint = uuid();
   if (encryptionEnabled) encRawKey = crypto.getRandomValues(new Uint8Array(32));
   pc = new RTCPeerConnection({ iceServers: STUN });
-  log('尝试连接：STUN 服务器 ' + STUN.map((s) => s.urls).join('、'), 'info');
+  logT('WebRTC', '尝试连接：STUN 服务器 ' + STUN.map((s) => s.urls).join('、'), 'info');
   dc = pc.createDataChannel(DC_LABEL, { ordered: true });
   dc.binaryType = 'arraybuffer';
   setupDataChannel(dc);
@@ -105,7 +105,7 @@ async function processOffer(code) {
     encKey = await crypto.subtle.importKey('raw', encRawKey, 'AES-GCM', false, ['encrypt', 'decrypt']);
   } else {
     encryptionEnabled = false; encKey = null;
-    if (payload.enc && !hasSubtle) log('收到加密会话但当前环境不支持，将按明文接收。', 'warn');
+    if (payload.enc && !hasSubtle) logT('WebRTC', '收到加密会话但当前环境不支持，将按明文接收。', 'warn');
   }
   pc = new RTCPeerConnection({ iceServers: STUN });
   pc.ondatachannel = (e) => { dc = e.channel; dc.binaryType = 'arraybuffer'; setupDataChannel(dc); };
@@ -116,7 +116,7 @@ async function processOffer(code) {
   try {
     await pc.setRemoteDescription({ type: 'offer', sdp: offerSdp });
     await addRemoteCandidates(pc, offerCands);
-    log('尝试连接：对方候选地址 ' + (candidateTargets(offerCands) || '(无)') + '（STUN ' + STUN.map((s) => s.urls).join('、') + '）', 'info');
+    logT('WebRTC', '尝试连接：对方候选地址 ' + (candidateTargets(offerCands) || '(无)') + '（STUN ' + STUN.map((s) => s.urls).join('、') + '）', 'info');
   } catch (e) {
     console.error('[SDP 重建失败·Offer] 解析用的 SDP：\n' + offerSdp.split('\r\n').map((l, i) => (i + 1) + ': ' + l).join('\n'));
     console.error('[SDP 重建失败·Offer] 原始 payload：', payload);
@@ -144,7 +144,7 @@ async function processOffer(code) {
 
 async function processAnswer(code) {
   const payload = await decodePayload(code);
-  if (payload.fp !== sessionFingerprint) log('⚠️ 应答指纹不匹配！', 'warn');
+  if (payload.fp !== sessionFingerprint) logT('WebRTC', '⚠️ 应答指纹不匹配！', 'warn');
   if (payload.enc && hasSubtle && !encKey) {
     encryptionEnabled = true;
     encRawKey = base64ToBytes(payload.enc.k);
@@ -154,13 +154,13 @@ async function processAnswer(code) {
   try {
     await pc.setRemoteDescription({ type: 'answer', sdp: answerSdp });
     await addRemoteCandidates(pc, answerCands);
-    log('尝试连接：对方候选地址 ' + (candidateTargets(answerCands) || '(无)') + '（STUN ' + STUN.map((s) => s.urls).join('、') + '）', 'info');
+    logT('WebRTC', '尝试连接：对方候选地址 ' + (candidateTargets(answerCands) || '(无)') + '（STUN ' + STUN.map((s) => s.urls).join('、') + '）', 'info');
   } catch (e) {
     console.error('[SDP 重建失败·Answer] 解析用的 SDP：\n' + answerSdp.split('\r\n').map((l, i) => (i + 1) + ': ' + l).join('\n'));
     console.error('[SDP 重建失败·Answer] 原始 payload：', payload);
     throw e;
   }
-  log('已设置应答，等待 DataChannel 建立…', 'info');
+  logT('WebRTC', '已设置应答，等待 DataChannel 建立…', 'info');
 }
 
 function setupDataChannel(channel) {
@@ -168,12 +168,12 @@ function setupDataChannel(channel) {
     const max = (channel.maxMessageSize && channel.maxMessageSize > 0) ? channel.maxMessageSize : 65536;
     const overhead = encryptionEnabled ? (ENC_HEADER + 16) : 9;
     CHUNK = Math.max(1024, Math.min(MAX_PAYLOAD, max - overhead - 64));
-    log('DataChannel 已建立（maxMessageSize=' + max + '，分块=' + CHUNK + '）。', 'ok');
+    logT('WebRTC', 'DataChannel 已建立（maxMessageSize=' + max + '，分块=' + CHUNK + '）。', 'ok');
     setBadge('已连接', 'on');
     channel.send(JSON.stringify({ type: 'fp', value: sessionFingerprint }));
     if (typeof onChannelOpen === 'function') onChannelOpen();
   };
-  channel.onclose = () => { setBadge('已断开', 'off'); log('DataChannel 已关闭。', 'warn'); if (typeof refreshConnectedNav === 'function') refreshConnectedNav(); };
+  channel.onclose = () => { setBadge('已断开', 'off'); logT('WebRTC', 'DataChannel 已关闭。', 'warn'); if (typeof refreshConnectedNav === 'function') refreshConnectedNav(); };
   channel.onmessage = handleMessage;
 }
 
@@ -183,8 +183,8 @@ function handleMessage(e) {
     let msg; try { msg = JSON.parse(e.data); } catch (err) { return; }
     switch (msg.type) {
       case 'fp':
-        if (msg.value !== sessionFingerprint) { log('⚠️ 会话指纹不匹配，疑似中间人攻击，已关闭通道！', 'err'); dc.close(); }
-        else log('会话指纹校验通过 ✓', 'ok');
+        if (msg.value !== sessionFingerprint) { logT('WebRTC', '⚠️ 会话指纹不匹配，疑似中间人攻击，已关闭通道！', 'err'); dc.close(); }
+        else logT('WebRTC', '会话指纹校验通过 ✓', 'ok');
         break;
       case 'file-meta': onFileMeta(msg); break;
       case 'file-complete': onFileComplete(msg); break;
@@ -202,6 +202,7 @@ function handleMessage(e) {
       case 'screen-request-keyframe': onScreenRequestKeyframe(); break;
       case 'screen-abr': onScreenAbr(msg); break;
       case 'screen-watch-info': onScreenWatchInfo(msg); break;
+      case 'screen-crop': onScreenCrop(msg); break; // 发送端告知“正在/已停止 Canvas 裁切”，监看端据此切换显示
       case 'clipboard': onClipboard(msg); break;
     }
   } else {
@@ -224,10 +225,10 @@ function onFileMeta(msg) {
     rec.item = makeTransferItem({ name: '📥 ' + msg.name, size: msg.size });
     updateTransferStatus(rec.item, '接收中…（流式写盘）', null);
     openSaveForRec(rec).catch(() => {
-      if (rec.meta.size <= DIRECT_DOWNLOAD_MAX) { rec.classicFallback = true; log('保存位置选择被浏览器拦截（需用户手势）；小文件将自动下载到默认位置。', 'warn'); }
-      else { rec.needsSave = true; addSaveButton(rec); updateTransferStatus(rec.item, '请点击「选择保存位置」', 'warn'); log('大文件需要选择保存位置：' + msg.name, 'warn'); }
+      if (rec.meta.size <= DIRECT_DOWNLOAD_MAX) { rec.classicFallback = true; logT('文件', '保存位置选择被浏览器拦截（需用户手势）；小文件将自动下载到默认位置。', 'warn'); }
+      else { rec.needsSave = true; addSaveButton(rec); updateTransferStatus(rec.item, '请点击「选择保存位置」', 'warn'); logT('文件', '大文件需要选择保存位置：' + msg.name, 'warn'); }
     });
-    log('收到文件元信息（流式写盘）：' + msg.name + ' (' + formatBytes(msg.size) + ')', 'info');
+    logT('文件', '收到文件元信息（流式写盘）：' + msg.name + ' (' + formatBytes(msg.size) + ')', 'info');
     return;
   }
   const rec = { fileId: msg.fileId, meta: msg, chunkSize: cs, chunks: new Array(total), received: 0, receivedBytes: 0, item: null };
@@ -235,7 +236,7 @@ function onFileMeta(msg) {
   rec.item = makeTransferItem({ name: '📥 ' + msg.name, size: msg.size });
   updateTransferStatus(rec.item, '接收中…', null);
   idbSaveMeta(rec);
-  log('收到文件元信息：' + msg.name + ' (' + formatBytes(msg.size) + ')', 'info');
+  logT('文件', '收到文件元信息：' + msg.name + ' (' + formatBytes(msg.size) + ')', 'info');
 }
 
 function onFileComplete(msg) {
@@ -254,7 +255,7 @@ function onFileComplete(msg) {
   } else {
     const missing = [];
     for (let i = 0; i < rec.chunks.length; i++) if (!rec.chunks[i]) missing.push(i);
-    log('缺失 ' + missing.length + ' 个分块，向对方请求补传…', 'warn');
+    logT('文件', '缺失 ' + missing.length + ' 个分块，向对方请求补传…', 'warn');
     dc.send(JSON.stringify({ type: 'resume-request', fileId: msg.fileId, missing }));
   }
 }
@@ -263,21 +264,21 @@ function requestMissing(rec, total, isMissing, fileId) {
   const missing = [];
   for (let i = 0; i < total; i++) if (isMissing(i)) missing.push(i);
   if (!missing.length) return;
-  log('缺失 ' + missing.length + ' 个分块，向对方请求补传…', 'warn');
+  logT('文件', '缺失 ' + missing.length + ' 个分块，向对方请求补传…', 'warn');
   dc.send(JSON.stringify({ type: 'resume-request', fileId, missing }));
 }
 
 async function onResumeRequest(msg) {
   const send = activeSends.get(msg.fileId);
-  if (!send) { log('收到补传请求，但本地无该文件记录。', 'warn'); return; }
-  log('收到补传请求，补传 ' + msg.missing.length + ' 个分块…', 'info');
+  if (!send) { logT('文件', '收到补传请求，但本地无该文件记录。', 'warn'); return; }
+  logT('文件', '收到补传请求，补传 ' + msg.missing.length + ' 个分块…', 'info');
   for (const i of msg.missing) {
     while (dc.bufferedAmount > BUFFER_THRESHOLD) await sleep(15);
     const chunk = await readChunk(send.file, i);
     const frame = await buildFrame(msg.fileId, i, chunk);
     dc.send(frame);
   }
-  log('补传完成。', 'ok');
+  logT('文件', '补传完成。', 'ok');
 }
 
 async function handleBinary(buf) {
@@ -289,7 +290,7 @@ async function handleBinary(buf) {
   if (tag === TAG_PLAIN) {
     payload = new Uint8Array(buf, 9);
   } else if (tag === TAG_ENC) {
-    if (!encKey) { log('收到加密分块但本地无密钥，已忽略。', 'err'); return; }
+    if (!encKey) { logT('文件', '收到加密分块但本地无密钥，已忽略。', 'err'); return; }
     const ivRandom = new Uint8Array(buf, 9, 8);
     const ct = new Uint8Array(buf, ENC_HEADER);
     const iv = new Uint8Array(12);
@@ -298,17 +299,17 @@ async function handleBinary(buf) {
     try {
       const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, encKey, ct);
       payload = new Uint8Array(plain);
-    } catch (err) { log('分块解密失败：' + err.message, 'err'); return; }
+    } catch (err) { logT('文件', '分块解密失败：' + err.message, 'err'); return; }
   } else return;
   const rec = incoming.get(fileId);
-  if (!rec) { log('收到未知 fileId 的分块，已忽略。', 'warn'); return; }
+  if (!rec) { logT('文件', '收到未知 fileId 的分块，已忽略。', 'warn'); return; }
 
   if (rec.streaming) {
     if (!rec.receivedFlags[chunkIndex]) {
       rec.receivedFlags[chunkIndex] = true;
       rec.receivedCount++;
       rec.receivedBytes += payload.length;
-      if (rec.writer) { try { await rec.writer.write(payload); } catch (e) { log('写入磁盘失败：' + e.message, 'err'); } }
+      if (rec.writer) { try { await rec.writer.write(payload); } catch (e) { logT('文件', '写入磁盘失败：' + e.message, 'err'); } }
       else (rec.buffer || (rec.buffer = new Array(rec.totalChunks)))[chunkIndex] = payload;
       updateTransferProgress(rec.item, rec.receivedBytes, rec.meta.size);
     }
@@ -366,11 +367,11 @@ async function buildFrame(fileId, chunkIndex, payloadBytes) {
 }
 
 async function sendFiles(fileList) {
-  if (!dc || dc.readyState !== 'open') { const m = 'DataChannel 尚未就绪，无法发送（请确认连接状态为“已连接”）。'; log(m, 'err'); alert(m); return; }
-  log('开始发送 ' + fileList.length + ' 个文件…', 'info');
+  if (!dc || dc.readyState !== 'open') { const m = 'DataChannel 尚未就绪，无法发送（请确认连接状态为“已连接”）。'; logT('文件', m, 'err'); alert(m); return; }
+  logT('文件', '开始发送 ' + fileList.length + ' 个文件…', 'info');
   for (const file of fileList) {
     try { await sendFile(file); }
-    catch (e) { log('发送失败：' + e.message, 'err'); }
+    catch (e) { logT('文件', '发送失败：' + e.message, 'err'); }
   }
 }
 
@@ -380,26 +381,26 @@ async function sendFile(file) {
   const item = makeTransferItem({ name: '📤 ' + file.name, size: file.size });
   updateTransferStatus(item, '准备中…', null);
   activeSends.set(fileId, { file, totalChunks });
-  log('发送文件：' + file.name + ' (' + formatBytes(file.size) + ', ' + totalChunks + ' 分块)', 'info');
+  logT('文件', '发送文件：' + file.name + ' (' + formatBytes(file.size) + ', ' + totalChunks + ' 分块)', 'info');
   let hashHex = null;
-  if (hasSubtle) { try { hashHex = await sha256OfBlob(file); } catch (e) { log('校验和计算失败：' + e.message, 'warn'); } }
+  if (hasSubtle) { try { hashHex = await sha256OfBlob(file); } catch (e) { logT('文件', '校验和计算失败：' + e.message, 'warn'); } }
   try {
     dc.send(JSON.stringify({ type: 'file-meta', fileId, name: file.name, size: file.size, mime: file.type || 'application/octet-stream', hash: hashHex, chunkSize: CHUNK }));
-  } catch (e) { log('发送元信息失败：' + e.message, 'err'); throw e; }
+  } catch (e) { logT('文件', '发送元信息失败：' + e.message, 'err'); throw e; }
   let sent = 0;
   for (let i = 0; i < totalChunks; i++) {
     while (dc.bufferedAmount > BUFFER_THRESHOLD) await sleep(15);
     const chunk = await readChunk(file, i);
     const frame = await buildFrame(fileId, i, chunk);
     try { dc.send(frame); }
-    catch (e) { log('分块 #' + i + ' 发送失败：' + e.message + '（可能超过单条消息上限）', 'err'); throw e; }
+    catch (e) { logT('文件', '分块 #' + i + ' 发送失败：' + e.message + '（可能超过单条消息上限）', 'err'); throw e; }
     sent += chunk.length;
     updateTransferProgress(item, sent, file.size);
     if (i % 8 === 0) await sleep(0);
   }
   dc.send(JSON.stringify({ type: 'file-complete', fileId, totalChunks, hash: hashHex }));
   updateTransferStatus(item, '已发送 ✓', 'ok');
-  log('已发送：' + file.name, 'ok');
+  logT('文件', '已发送：' + file.name, 'ok');
 }
 
 // ---------- 聊天（文字 + 语音） ----------
@@ -431,14 +432,14 @@ async function onChat(msg) {
   if (msg.kind !== 'text') return;
   let text = msg.text;
   if (msg.enc && encKey) text = await decryptText(msg.enc);
-  if (text == null) { log('收到无法解密的聊天消息，已忽略。', 'warn'); return; }
+  if (text == null) { logT('聊天', '收到无法解密的聊天消息，已忽略。', 'warn'); return; }
   appendChatText('them', text);
   chatBytes += new Blob([text]).size; updateChatCap();
 }
 async function sendText() {
   const text = chatInput.value.trim();
   if (!text) return;
-  if (!dc || dc.readyState !== 'open') { log('DataChannel 未就绪，无法发送消息。', 'err'); return; }
+  if (!dc || dc.readyState !== 'open') { logT('聊天', 'DataChannel 未就绪，无法发送消息。', 'err'); return; }
   appendChatText('me', text);
   chatBytes += new Blob([text]).size; updateChatCap();
   chatInput.value = '';
@@ -480,8 +481,8 @@ function ensureAudioUnlock() {
       src.buffer = buf; src.connect(ctx.destination);
       if (src.start) src.start(0);
       if (ctx.state === 'suspended') ctx.resume().catch(() => {});
-      log('已尝试解锁 iOS 音频会话（静音探测）。', 'info');
-    } catch (e) { log('解锁音频会话失败：' + e.message, 'warn'); }
+      logT('语音', '已尝试解锁 iOS 音频会话（静音探测）。', 'info');
+    } catch (e) { logT('语音', '解锁音频会话失败：' + e.message, 'warn'); }
   }
 }
 document.addEventListener('touchend', ensureAudioUnlock);
@@ -500,7 +501,7 @@ function setRecUI(on) { chatMic.textContent = on ? '⏹ 停止' : '🎤 录音';
 async function startVoice() {
   ensureAudioUnlock();
   if (recording) return;
-  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { log('当前环境不支持麦克风（需 HTTPS/localhost）。', 'warn'); return; }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { logT('语音', '当前环境不支持麦克风（需 HTTPS/localhost）。', 'warn'); return; }
   // iOS 会静音 Web Audio 输入，故在 iOS 上优先用 MediaRecorder（WebRTC 媒体引擎，能拿到真实声音）；
   // 其它浏览器保持 WAV 优先，以保证旧 Safari 接收方也能播放。
   const ios = isIOS();
@@ -511,7 +512,7 @@ async function startVoice() {
   } else if (voiceSupported) {
     startVoiceMedia();
   } else {
-    log('当前浏览器不支持语音录制（无 MediaRecorder 且不支持 Web Audio）。', 'warn');
+    logT('语音', '当前浏览器不支持语音录制（无 MediaRecorder 且不支持 Web Audio）。', 'warn');
   }
 }
 // MediaRecorder 路径（iOS 优先）：走 WebRTC 媒体引擎采集，iOS 不会静音。
@@ -519,26 +520,26 @@ async function startVoice() {
 // 且 MediaRecorder 要用 timeslice 才能稳定产出数据（否则常为空）。
 async function startVoiceMedia() {
   try { recStream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
-  catch (e) { log('麦克风权限被拒绝：' + e.message, 'warn'); return; }
+  catch (e) { logT('语音', '麦克风权限被拒绝：' + e.message, 'warn'); return; }
   const tr = recStream.getAudioTracks()[0];
-  log('录音已获取麦克风：' + (tr ? tr.label : '无') + '，readyState=' + (tr ? tr.readyState : '?'), 'info');
+  logT('语音', '录音已获取麦克风：' + (tr ? tr.label : '无') + '，readyState=' + (tr ? tr.readyState : '?'), 'info');
   // iOS 激活采集：挂到“正在播放且非静音”的媒体元素（muted=false+volume=0，无回放但 iOS 视为在播放）
   if (audioPrimer) {
     try {
       audioPrimer.srcObject = recStream; audioPrimer.muted = true;
       const pp = audioPrimer.play();
-      if (pp && pp.catch) pp.catch((er) => log('录音激活元素播放被拒：' + er.message, 'warn'));
+      if (pp && pp.catch) pp.catch((er) => logT('语音', '录音激活元素播放被拒：' + er.message, 'warn'));
     } catch (e) {}
   }
   recChunks = [];
   const mime = pickVoiceMime();
   try { mediaRecorder = mime ? new MediaRecorder(recStream, { mimeType: mime }) : new MediaRecorder(recStream); }
-  catch (e) { log('无法创建录音器：' + e.message, 'err'); if (recStream) { recStream.getTracks().forEach((t) => t.stop()); recStream = null; } return; }
+  catch (e) { logT('语音', '无法创建录音器：' + e.message, 'err'); if (recStream) { recStream.getTracks().forEach((t) => t.stop()); recStream = null; } return; }
   mediaRecorder.ondataavailable = (e) => { if (e.data && e.data.size) recChunks.push(e.data); };
   mediaRecorder.onstop = onVoiceStop;
   // iOS 上用 timeslice 才能稳定产出数据（否则常为空）
-  try { mediaRecorder.start(200); } catch (e) { try { mediaRecorder.start(); } catch (e2) { log('录音启动失败：' + e2.message, 'err'); return; } }
-  recording = true; setRecUI(true); log('开始录音（MediaRecorder）…', 'info');
+  try { mediaRecorder.start(200); } catch (e) { try { mediaRecorder.start(); } catch (e2) { logT('语音', '录音启动失败：' + e2.message, 'err'); return; } }
+  recording = true; setRecUI(true); logT('语音', '开始录音（MediaRecorder）…', 'info');
 }
 function stopVoice() {
   if (voiceSupported && mediaRecorder && recording) mediaRecorder.stop();
@@ -557,19 +558,19 @@ function onVoiceStop() {
 // WAV 降级：Web Audio 采集 + 手动编码 WAV（兼容无 MediaRecorder 的旧浏览器）
 async function startVoiceWav() {
   wavCtx = getAudioCtx();
-  if (!wavCtx) { log('当前浏览器不支持 Web Audio，无法录音。', 'warn'); return; }
+  if (!wavCtx) { logT('语音', '当前浏览器不支持 Web Audio，无法录音。', 'warn'); return; }
   navigator.mediaDevices.getUserMedia({ audio: true })
     .then(async (stream) => {
       wavStream = stream; wavChunks = []; wavPeak = 0;
       const tr = stream.getAudioTracks()[0];
-      log('录音已获取麦克风：' + (tr ? tr.label : '无') + '，readyState=' + (tr ? tr.readyState : '?') + '，muted=' + (tr ? tr.muted : '?'), 'info');
+      logT('语音', '录音已获取麦克风：' + (tr ? tr.label : '无') + '，readyState=' + (tr ? tr.readyState : '?') + '，muted=' + (tr ? tr.muted : '?'), 'info');
       // iOS 需把本地流接到“正在播放且非静音”的媒体元素才能激活 Web Audio 采集；
       // muted=true 不会切到录音会话，故用 muted=false + volume=0（无 audible 回放，但 iOS 视为在播放）。
       if (audioPrimer) {
         try {
           audioPrimer.srcObject = stream; audioPrimer.muted = true;
           const pp = audioPrimer.play();
-          if (pp && pp.then) pp.then(() => {}).catch((er) => log('录音激活元素播放被拒：' + er.message, 'warn'));
+          if (pp && pp.then) pp.then(() => {}).catch((er) => logT('语音', '录音激活元素播放被拒：' + er.message, 'warn'));
         } catch (e) {}
       }
       if (wavCtx.state === 'suspended') { try { await wavCtx.resume(); } catch (e) {} }
@@ -584,15 +585,15 @@ async function startVoiceWav() {
         if (pk > wavPeak) wavPeak = pk;
       };
       wavSource.connect(wavNode); wavNode.connect(wavCtx.destination);
-      recording = true; setRecUI(true); log('开始录音…', 'info');
+      recording = true; setRecUI(true); logT('语音', '开始录音…', 'info');
       // 1 秒后无需停止即可观察是否有数据流入（峰值 >0 代表麦克风真的在出声）
-      setTimeout(() => { if (recording) log('录音进行中·采样峰值（≈0=静音）：' + wavPeak.toFixed(4), wavPeak > 0.001 ? 'ok' : 'warn'); }, 1000);
+      setTimeout(() => { if (recording) logT('语音', '录音进行中·采样峰值（≈0=静音）：' + wavPeak.toFixed(4), wavPeak > 0.001 ? 'ok' : 'warn'); }, 1000);
     })
-    .catch((e) => { log('麦克风权限被拒绝：' + e.message, 'warn'); });
+    .catch((e) => { logT('语音', '麦克风权限被拒绝：' + e.message, 'warn'); });
 }
 function stopVoiceWav() {
   recording = false; setRecUI(false);
-  log('录音采样峰值（≈0 表示未真正采集到声音）：' + wavPeak.toFixed(4), wavPeak > 0.001 ? 'ok' : 'warn');
+  logT('语音', '录音采样峰值（≈0 表示未真正采集到声音）：' + wavPeak.toFixed(4), wavPeak > 0.001 ? 'ok' : 'warn');
   const rate = wavCtx ? wavCtx.sampleRate : 16000;
   try { if (wavSource) wavSource.disconnect(); } catch (e) {}
   try { if (wavNode) wavNode.disconnect(); } catch (e) {}
@@ -601,7 +602,7 @@ function stopVoiceWav() {
     if (audioPrimer && audioPrimer.srcObject === wavStream) audioPrimer.srcObject = null;
     wavStream.getTracks().forEach((t) => t.stop()); wavStream = null;
   }
-  if (!wavChunks.length) { log('录音过短，已忽略。', 'warn'); return; }
+  if (!wavChunks.length) { logT('语音', '录音过短，已忽略。', 'warn'); return; }
   const blob = encodeWav(wavChunks, rate);
   wavChunks = [];
   finalizeVoice(blob);
@@ -627,15 +628,15 @@ function encodeWav(chunks, sampleRate) {
   return new Blob([view], { type: 'audio/wav' });
 }
 function finalizeVoice(blob) {
-  if (!blob || blob.size < 200) { log('录音过短，已忽略。', 'warn'); return; }
+  if (!blob || blob.size < 200) { logT('语音', '录音过短，已忽略。', 'warn'); return; }
   const ext = blob.type.indexOf('wav') >= 0 ? 'wav' : (blob.type.indexOf('mp4') >= 0 ? 'm4a' : 'webm');
   const name = 'voice-' + Date.now() + '.' + ext;
   appendChatAudio('me', URL.createObjectURL(blob));
   chatBytes += blob.size; updateChatCap();
-  sendChatVoice(blob, name).catch((e) => log('语音发送失败：' + e.message, 'err'));
+  sendChatVoice(blob, name).catch((e) => logT('语音', '语音发送失败：' + e.message, 'err'));
 }
 async function sendChatVoice(blob, name) {
-  if (!dc || dc.readyState !== 'open') { log('DataChannel 未就绪，无法发送语音。', 'err'); return; }
+  if (!dc || dc.readyState !== 'open') { logT('语音', 'DataChannel 未就绪，无法发送语音。', 'err'); return; }
   const fileId = nextFileId();
   const totalChunks = Math.ceil(blob.size / CHUNK) || 1;
   activeSends.set(fileId, { file: blob, totalChunks });
@@ -648,12 +649,12 @@ async function sendChatVoice(blob, name) {
     const chunk = await readChunk(blob, i);
     const frame = await buildFrame(fileId, i, chunk);
     try { dc.send(frame); }
-    catch (e) { log('语音分块 #' + i + ' 发送失败：' + e.message, 'err'); return; }
+    catch (e) { logT('语音', '语音分块 #' + i + ' 发送失败：' + e.message, 'err'); return; }
     sent += chunk.length;
     if (i % 16 === 0) await sleep(0);
   }
   dc.send(JSON.stringify({ type: 'file-complete', fileId, totalChunks, hash: hashHex, chat: true }));
-  log('语音已发送（' + formatBytes(blob.size) + '）', 'ok');
+  logT('语音', '语音已发送（' + formatBytes(blob.size) + '）', 'ok');
 }
 function onChatVoiceMeta(msg) {
   const cs = msg.chunkSize || MAX_PAYLOAD;
@@ -666,13 +667,13 @@ function onChatVoiceMeta(msg) {
   const state = document.createElement('div'); state.className = 'chat-state'; state.textContent = '接收中…';
   b.body.appendChild(bar); b.body.appendChild(state);
   rec.chatBubble = { el: b.el, body: b.body, meta: b.meta, fill, prog: state, state };
-  log('收到语音消息：' + msg.name + ' (' + formatBytes(msg.size) + ')', 'info');
+  logT('语音', '收到语音消息：' + msg.name + ' (' + formatBytes(msg.size) + ')', 'info');
 }
 async function assembleChatVoice(fileId) {
   const rec = incoming.get(fileId);
   if (!rec || rec.completed) return;
   rec.completed = true;
-  for (let i = 0; i < rec.chunks.length; i++) if (!rec.chunks[i]) { log('语音分块缺失，等待补传…', 'warn'); return; }
+  for (let i = 0; i < rec.chunks.length; i++) if (!rec.chunks[i]) { logT('语音', '语音分块缺失，等待补传…', 'warn'); return; }
   const blob = new Blob(rec.chunks, { type: rec.meta.mime || 'audio/webm' });
   let ok = true;
   if (rec.meta.hash && hasSubtle) { try { const h = await sha256OfBlob(blob); ok = (h === rec.meta.hash); } catch (e) {} }
@@ -682,7 +683,7 @@ async function assembleChatVoice(fileId) {
   chatBytes += blob.size; updateChatCap();
   rec.chatBubble.state.textContent = ok ? '✓' : '校验失败';
   scrollChat();
-  log('语音消息已就绪' + (ok ? ' ✓' : '（校验失败）'), ok ? 'ok' : 'err');
+  logT('语音', '语音消息已就绪' + (ok ? ' ✓' : '（校验失败）'), ok ? 'ok' : 'err');
 }
 
 // ---------- 实时通话 ----------
@@ -711,7 +712,7 @@ document.addEventListener('visibilitychange', () => {
     screenWatchVideo.srcObject = stream; // 重新挂载，触发媒体源重新获取与重绘
     playWatchVideo();
   });
-  log('已从后台返回，正在恢复监看画面…', 'info');
+  logT('WebRTC', '已从后台返回，正在恢复监看画面…', 'info');
 });
 function onRemoteTrack(e) {
   if (e.track && e.track.kind === 'audio') {
@@ -736,36 +737,36 @@ function setCallState(text, live) {
 }
 async function activateMic() {
   ensureAudioUnlock();
-  if (!dc || dc.readyState !== 'open') { log('DataChannel 未就绪，无法通话。', 'err'); return false; }
-  if (!audioTransceiver) { log('本连接未协商音频轨道，无法通话。', 'err'); return false; }
+  if (!dc || dc.readyState !== 'open') { logT('通话', 'DataChannel 未就绪，无法通话。', 'err'); return false; }
+  if (!audioTransceiver) { logT('通话', '本连接未协商音频轨道，无法通话。', 'err'); return false; }
   if (calling) return true;
-  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { log('当前环境不支持麦克风（需 HTTPS/localhost）。', 'warn'); return false; }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { logT('通话', '当前环境不支持麦克风（需 HTTPS/localhost）。', 'warn'); return false; }
   // 旧 Safari 对 echoCancellation/noiseSuppression/autoGainControl 等高级约束支持不稳，
   // 直接用最兼容的 { audio: true } 获取，避免返回“空转/静音”轨道。
   try {
     localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  } catch (e) { log('麦克风权限被拒绝或不可用：' + e.message, 'warn'); return false; }
+  } catch (e) { logT('通话', '麦克风权限被拒绝或不可用：' + e.message, 'warn'); return false; }
   micTrack = localStream.getAudioTracks()[0];
-  if (!micTrack) { log('getUserMedia 返回了空音频轨道，无法通话。', 'err'); return false; }
-  log('已获取麦克风：' + (micTrack.label || '默认') + '，轨道数=' + localStream.getAudioTracks().length + '，readyState=' + micTrack.readyState + '，muted=' + micTrack.muted, 'info');
+  if (!micTrack) { logT('通话', 'getUserMedia 返回了空音频轨道，无法通话。', 'err'); return false; }
+  logT('通话', '已获取麦克风：' + (micTrack.label || '默认') + '，轨道数=' + localStream.getAudioTracks().length + '，readyState=' + micTrack.readyState + '，muted=' + micTrack.muted, 'info');
   // 关键：Safari 需把麦克风流接到一个静音且正在播放的 <audio> 元素，采集管线才会真正启动，
   // 否则不显示麦克风标志、也不向 WebRTC 发送端投递采样（且不报错）。
   if (audioPrimer) {
     try {
       audioPrimer.srcObject = localStream; audioPrimer.muted = true;
       const pp = audioPrimer.play();
-      if (pp && pp.then) pp.then(() => log('麦克风激活元素已开始播放（采集应已激活）。', 'info')).catch((er) => log('麦克风激活元素播放被拒：' + er.message, 'warn'));
-      else log('麦克风激活元素已开始播放（同步）。', 'info');
+      if (pp && pp.then) pp.then(() => logT('通话', '麦克风激活元素已开始播放（采集应已激活）。', 'info')).catch((er) => logT('通话', '麦克风激活元素播放被拒：' + er.message, 'warn'));
+      else logT('通话', '麦克风激活元素已开始播放（同步）。', 'info');
     }
-    catch (e) { log('麦克风激活元素播放失败：' + e.message, 'warn'); }
+    catch (e) { logT('通话', '麦克风激活元素播放失败：' + e.message, 'warn'); }
   }
   try { await audioTransceiver.sender.replaceTrack(micTrack); }
-  catch (e) { log('接入麦克风失败：' + e.message, 'err'); return false; }
+  catch (e) { logT('通话', '接入麦克风失败：' + e.message, 'err'); return false; }
   // 旧 Safari 在 addTransceiver 时无轨道、后续 replaceTrack 不重协商，会导致 m=audio 没有 a=ssrc，
   // 对方收不到声音且不报错。主动触发一次重协商，让 SDP 携带发送轨道。
   if (typeof reneg === 'function') {
-    try { await reneg(); log('通话音频重协商完成（已带上发送轨道）。', 'ok'); }
-    catch (e) { log('通话音频重协商失败：' + e.message, 'warn'); }
+    try { await reneg(); logT('通话', '通话音频重协商完成（已带上发送轨道）。', 'ok'); }
+    catch (e) { logT('通话', '通话音频重协商失败：' + e.message, 'warn'); }
   }
   calling = true;
   // 进入通话：仅解除 disabled 不够，还必须移除 hidden，否则按钮一直不可见
@@ -776,19 +777,19 @@ async function activateMic() {
   if (remoteAudio) remoteAudio.muted = false;
   callMute.textContent = '🔇 静音';
   unlockRemoteAudio();
-  log('已接入麦克风（通话中）。', 'ok');
+  logT('通话', '已接入麦克风（通话中）。', 'ok');
   return true;
 }
 async function initiateCall() {
   ensureAudioUnlock();
-  if (!dc || dc.readyState !== 'open') { log('DataChannel 未就绪，无法发起通话。', 'err'); return; }
+  if (!dc || dc.readyState !== 'open') { logT('通话', 'DataChannel 未就绪，无法发起通话。', 'err'); return; }
   if (calling) return;
   const ok = await activateMic();
   if (!ok) return;
   callStart.classList.add('hidden'); callJoin.classList.add('hidden'); callReject.classList.add('hidden');
   setCallState('等待对方接听…', true);
   sendCall('call-invite');
-  log('已发起通话，等待对方加入…', 'ok');
+  logT('通话', '已发起通话，等待对方加入…', 'ok');
 }
 async function joinCall() {
   ensureAudioUnlock();
@@ -798,13 +799,13 @@ async function joinCall() {
   callStart.classList.add('hidden'); callJoin.classList.add('hidden'); callReject.classList.add('hidden');
   setCallState('通话中…', true);
   sendCall('call-join');
-  log('已加入通话。', 'ok');
+  logT('通话', '已加入通话。', 'ok');
 }
 function rejectCall() {
   callStart.classList.remove('hidden'); callJoin.classList.add('hidden'); callReject.classList.add('hidden');
   setCallState('未通话', false);
   sendCall('call-reject');
-  log('已拒绝通话。', 'info');
+  logT('通话', '已拒绝通话。', 'info');
 }
 function endCall() {
   if (audioTransceiver && audioTransceiver.sender) audioTransceiver.sender.replaceTrack(null).catch(() => {});
@@ -819,7 +820,7 @@ function endCall() {
   callMute.textContent = '🔇 静音'; callMicMute.textContent = '🎙 闭麦';
   setCallState('已结束', false);
   sendCall('call-end');
-  log('已结束通话。', 'info');
+  logT('通话', '已结束通话。', 'info');
 }
 function stopCallLocal() {
   if (audioTransceiver && audioTransceiver.sender) audioTransceiver.sender.replaceTrack(null).catch(() => {});
@@ -843,11 +844,11 @@ function onCallInvite() {
   callJoin.classList.remove('hidden');
   callReject.classList.remove('hidden');
   setCallState('📞 对方发起通话，是否加入？', true);
-  log('收到通话邀请，可选择加入或拒绝。', 'info');
+  logT('通话', '收到通话邀请，可选择加入或拒绝。', 'info');
 }
-function onCallJoin() { setCallState('通话中…', true); log('对方已加入，通话中。', 'ok'); }
-function onCallReject() { stopCallLocal(); setCallState('对方拒绝通话', false); log('对方拒绝了通话。', 'warn'); }
-function onCallEnd() { stopCallLocal(); setCallState('对方已结束通话', false); log('对方结束了通话。', 'info'); }
+function onCallJoin() { setCallState('通话中…', true); logT('通话', '对方已加入，通话中。', 'ok'); }
+function onCallReject() { stopCallLocal(); setCallState('对方拒绝通话', false); logT('通话', '对方拒绝了通话。', 'warn'); }
+function onCallEnd() { stopCallLocal(); setCallState('对方已结束通话', false); logT('通话', '对方结束了通话。', 'info'); }
 // 静音：控制“扬声器”（我听到的远端声音），而非麦克风
 function toggleMute() {
   if (!remoteAudio) return;
@@ -868,14 +869,14 @@ async function assembleFile(fileId) {
   const rec = incoming.get(fileId);
   if (!rec || rec.completed) return;
   rec.completed = true;
-  for (let i = 0; i < rec.chunks.length; i++) if (!rec.chunks[i]) { log('分块缺失，等待补传…', 'warn'); return; }
+  for (let i = 0; i < rec.chunks.length; i++) if (!rec.chunks[i]) { logT('文件', '分块缺失，等待补传…', 'warn'); return; }
   const blob = new Blob(rec.chunks, { type: rec.meta.mime || 'application/octet-stream' });
   let ok = true;
   if (rec.meta.hash && hasSubtle) {
     try {
       const h = await sha256OfBlob(blob);
       ok = (h === rec.meta.hash);
-      log(ok ? ('校验通过 ✓ ' + rec.meta.name) : ('⚠️ 校验失败！' + rec.meta.name), ok ? 'ok' : 'err');
+      logT('文件', ok ? ('校验通过 ✓ ' + rec.meta.name) : ('⚠️ 校验失败！' + rec.meta.name), ok ? 'ok' : 'err');
       rec.item.hash.textContent = 'SHA-256: ' + h;
     } catch (e) {}
   }
@@ -913,7 +914,7 @@ async function flushBuffer(rec) {
   if (!rec.buffer) return;
   for (let i = 0; i < rec.totalChunks; i++) {
     const p = rec.buffer[i];
-    if (p) { try { await rec.writer.write(p); } catch (e) { log('写入磁盘失败：' + e.message, 'err'); } rec.buffer[i] = null; }
+    if (p) { try { await rec.writer.write(p); } catch (e) { logT('文件', '写入磁盘失败：' + e.message, 'err'); } rec.buffer[i] = null; }
   }
   rec.buffer = null;
 }
@@ -924,7 +925,7 @@ function addSaveButton(rec) {
   btn.style.marginTop = '8px';
   btn.addEventListener('click', () => {
     btn.disabled = true; btn.textContent = '请在对话框中选择…';
-    openSaveForRec(rec).then(() => { btn.remove(); }).catch((e) => { btn.disabled = false; btn.textContent = '📁 点击选择保存位置'; log('未选择保存位置：' + e.message, 'warn'); });
+    openSaveForRec(rec).then(() => { btn.remove(); }).catch((e) => { btn.disabled = false; btn.textContent = '📁 点击选择保存位置'; logT('文件', '未选择保存位置：' + e.message, 'warn'); });
   });
   rec.item.el.appendChild(btn);
 }
@@ -932,9 +933,9 @@ async function finalizeStreaming(rec) {
   if (rec.closed) return;
   if (!rec.writer) { rec.pendingFinalize = true; return; }
   rec.closed = true;
-  try { await rec.writer.close(); } catch (e) { log('关闭文件失败：' + e.message, 'err'); }
+  try { await rec.writer.close(); } catch (e) { logT('文件', '关闭文件失败：' + e.message, 'err'); }
   updateTransferStatus(rec.item, '已保存到磁盘 ✓', 'ok');
-  log('已保存到磁盘：' + rec.meta.name, 'ok');
+  logT('文件', '已保存到磁盘：' + rec.meta.name, 'ok');
   if (rec.meta.hash && hasSubtle && rec.handle) {
     try {
       const file = await rec.handle.getFile();
@@ -942,8 +943,8 @@ async function finalizeStreaming(rec) {
       const ok = (h === rec.meta.hash);
       rec.item.hash.textContent = 'SHA-256: ' + h + (ok ? ' ✓' : ' ✗ 不匹配');
       updateTransferStatus(rec.item, ok ? '已保存 ✓（校验通过）' : '已保存（校验失败）', ok ? 'ok' : 'err');
-      log(ok ? '流式校验通过 ✓ ' + rec.meta.name : '⚠️ 流式校验失败！' + rec.meta.name, ok ? 'ok' : 'err');
-    } catch (e) { log('校验失败：' + e.message, 'warn'); }
+      logT('文件', ok ? '流式校验通过 ✓ ' + rec.meta.name : '⚠️ 流式校验失败！' + rec.meta.name, ok ? 'ok' : 'err');
+    } catch (e) { logT('文件', '校验失败：' + e.message, 'warn'); }
   }
   idbMarkDone(rec.fileId, true);
 }
@@ -956,15 +957,15 @@ async function doClassicFromBuffer(rec) {
   const blob = new Blob(parts);
   triggerDownload(blob, rec.meta.name);
   updateTransferStatus(rec.item, '已下载 ✓', 'ok');
-  log('已下载（经典模式）：' + rec.meta.name + ' (' + formatBytes(rec.meta.size) + ')', 'ok');
+  logT('文件', '已下载（经典模式）：' + rec.meta.name + ' (' + formatBytes(rec.meta.size) + ')', 'ok');
   if (rec.meta.hash && hasSubtle) {
     try {
       const h = await hashStream(blob);
       const ok = (h === rec.meta.hash);
       rec.item.hash.textContent = 'SHA-256: ' + h + (ok ? ' ✓' : ' ✗ 不匹配');
       updateTransferStatus(rec.item, ok ? '已下载 ✓（校验通过）' : '已下载（校验失败）', ok ? 'ok' : 'err');
-      log(ok ? '校验通过 ✓ ' + rec.meta.name : '⚠️ 校验失败！' + rec.meta.name, ok ? 'ok' : 'err');
-    } catch (e) { log('校验失败：' + e.message, 'warn'); }
+      logT('文件', ok ? '校验通过 ✓ ' + rec.meta.name : '⚠️ 校验失败！' + rec.meta.name, ok ? 'ok' : 'err');
+    } catch (e) { logT('文件', '校验失败：' + e.message, 'warn'); }
   }
   idbMarkDone(rec.fileId, false);
 }

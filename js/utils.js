@@ -31,6 +31,9 @@ function log(msg, level) {
   else if (level === 'warn') console.warn('[BrowerShare] ' + msg);
   else console.log('[BrowerShare] ' + msg);
 }
+// 带子功能标签的日志：tag 形如 'Canvas裁切' / 'ABR' / 'WebRTC'，输出自动加 [tag] 前缀。
+// logT 内部仍调用 log（不递归），故 log 本体保持原样。
+function logT(tag, msg, level) { log('[' + tag + '] ' + msg, level); }
 
 function setBadge(text, kind) {
   connBadge.textContent = text;
@@ -98,14 +101,14 @@ async function encodePayload(obj) {
   const bytes = new TextEncoder().encode(json);
   // 自研压缩优先（全平台可用）
   try { return '3' + bytesToBase64url(await deflateBytes(bytes)); }
-  catch (e) { log('压缩失败，回退明文：' + e.message, 'warn'); }
+  catch (e) { logT('加密', '压缩失败，回退明文：' + e.message, 'warn'); }
   return '0' + bytesToBase64url(bytes);
 }
 // SDP 字段压缩（自研 LZH，全平台可用；无收益回退明文）。返回 { z, c }，c='lzh' 表示已压缩
 async function encodeSdpField(sdp) {
   const bytes = new TextEncoder().encode(sdp);
   try { return { z: bytesToBase64url(await deflateBytes(bytes)), c: 'lzh' }; }
-  catch (e) { log('SDP 压缩失败，回退明文：' + e.message, 'warn'); }
+  catch (e) { logT('加密', 'SDP 压缩失败，回退明文：' + e.message, 'warn'); }
   return { z: bytesToBase64url(bytes), c: 0 };
 }
 async function decodePayload(code) {

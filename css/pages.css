@@ -56,10 +56,11 @@
 .screen-video {
   width: 100%; border-radius: 12px; background: #000; margin-top: 12px;
   max-height: 56vh; border: 1px solid var(--border); touch-action: none;
+  transform-origin: 0 0; /* 与 szGetCropRect/szClampPan/szZoomAt 的 0,0 原点坐标数学一致 */
 }
 /* 屏幕共享的本地预览保持原始方向（不要镜像，避免文字/界面左右颠倒） */
 
-/* 监看舞台：承载视频与全屏按钮 */
+/* 监看舞台：承载视频与全屏按钮（引入 Canvas 裁切前即如此，铺满无黑边、平移稳定） */
 .screen-stage { position: relative; margin-top: 12px; overflow: hidden; touch-action: none; }
 .screen-fs-bar {
   display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; justify-content: center;

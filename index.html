@@ -7,7 +7,7 @@
   <title>浏览器共享协作</title>
   <link rel="stylesheet" href="css/base.css?v=49" />
   <link rel="stylesheet" href="css/components.css?v=48" />
-  <link rel="stylesheet" href="css/pages.css?v=48" />
+  <link rel="stylesheet" href="css/pages.css?v=54" />
 </head>
 <body>
   <header class="topbar">
@@ -180,6 +180,11 @@
           <button id="screenStart" class="btn">▶ 开始共享</button>
           <button id="screenStop" class="btn btn-danger hidden">⏹ 停止共享</button>
         </div>
+        <div class="row" id="szCropRow">
+          <label class="field checkbox">
+            <input type="checkbox" id="szCropChk" /> 使用 Canvas 裁切（仅传监看端放大的局部，更清晰）
+          </label>
+        </div>
         <p id="screenSendStats" class="muted small"></p>
         <video id="screenLocal" class="screen-video hidden" muted autoplay playsinline></video>
       </div>
@@ -294,12 +299,12 @@
   <script src="js/dom.js?v=48"></script>
   <script src="js/config.js?v=48"></script>
   <script src="js/lzh.js?v=48"></script>
-  <script src="js/utils.js?v=48"></script>
+  <script src="js/utils.js?v=49"></script>
   <script src="js/sdp.js?v=48"></script>
-  <script src="js/webrtc.js?v=48"></script>
-  <script src="js/features.js?v=71"></script>
+  <script src="js/webrtc.js?v=49"></script>
+  <script src="js/features.js?v=77"></script>
   <script src="js/nav.js?v=48"></script>
-  <script src="js/ui.js?v=58"></script>
-  <script src="js/test.js?v=48"></script>
+  <script src="js/ui.js?v=13"></script>
+  <script src="js/test.js?v=49"></script>
 </body>
 </html>

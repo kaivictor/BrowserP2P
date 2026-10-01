@@ -1,5 +1,5 @@
 // features.js —— 二维码 / 扫码 / 屏幕共享 / 剪贴板同步 / 聊天容量 / 复制提示
-log('[features.js] 已加载 v=71', 'info'); // 自证：日志首行显示此版本，说明手机跑的是新版；若看不到这行=旧缓存
+logT('屏幕共享', '[features.js] 已加载 v=76', 'info'); // 自证：日志首行显示此版本，说明手机跑的是新版；若看不到这行=旧缓存
 
 // ---------- 二维码（自动分块） ----------
 const CHUNK_MAGIC = '~BS1~';   // 分块二维码魔标，区别于完整单张载荷
@@ -93,7 +93,7 @@ function hideQRFullscreen() {
 let scanStream = null, scanRAF = null, scanActive = false, scanCb = null, scanChunks = null;
 async function openScanner(cb) {
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    log('当前环境不支持摄像头（需 HTTPS/localhost 安全上下文），请改用粘贴。', 'warn');
+    logT('二维码', '当前环境不支持摄像头（需 HTTPS/localhost 安全上下文），请改用粘贴。', 'warn');
     return;
   }
   scanCb = cb; scanActive = true;
@@ -104,7 +104,7 @@ async function openScanner(cb) {
     scanStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
   } catch (e) {
     try { scanStream = await navigator.mediaDevices.getUserMedia({ video: true }); }
-    catch (e2) { log('无法访问摄像头：' + e2.message, 'err'); closeScanner(); return; }
+    catch (e2) { logT('二维码', '无法访问摄像头：' + e2.message, 'err'); closeScanner(); return; }
   }
   scanVideo.srcObject = scanStream;
   try { await scanVideo.play(); } catch (e) {}
@@ -115,9 +115,9 @@ async function preRequestCamera() {
   try {
     const s = await navigator.mediaDevices.getUserMedia({ video: true });
     s.getTracks().forEach((t) => t.stop());
-    log('已获得摄像头权限（用于扫码，并帮助 WebRTC 在局域网暴露真实本地 IP）。', 'ok');
+    logT('二维码', '已获得摄像头权限（用于扫码，并帮助 WebRTC 在局域网暴露真实本地 IP）。', 'ok');
   } catch (e) {
-    log('未授予摄像头权限：扫码时再申请，不影响文件传输与通话。', 'warn');
+    logT('二维码', '未授予摄像头权限：扫码时再申请，不影响文件传输与通话。', 'warn');
   }
 }
 function scanLoop() {
@@ -177,12 +177,12 @@ function copyText(text, okMsg) {
 function fallbackCopy(text, okMsg) {
   const ta = document.createElement('textarea');
   ta.value = text; document.body.appendChild(ta); ta.select();
-  try { document.execCommand('copy'); onCopied(okMsg); } catch (e) { log('复制失败，请手动复制。', 'warn'); }
+  try { document.execCommand('copy'); onCopied(okMsg); } catch (e) { logT('复制', '复制失败，请手动复制。', 'warn'); }
   ta.remove();
 }
 function onCopied(okMsg) {
   toast('已复制');
-  if (okMsg) log(okMsg, 'ok');
+  if (okMsg) logT('复制', okMsg, 'ok');
 }
 
 // ---------- 屏幕共享（带内重协商，复用已建立的 DataChannel） ----------
@@ -246,6 +246,71 @@ let abrZoomBoost = 1;   // 监看端缩放 -> 提高下发分辨率，使放大�
 let szLastWatchZoom = 1, szWatchRetryTimer = null, szWatchActive = false; // 断线缓存最新 zoom 并定时重试补发；仅在监看中才上报
 let szLastAbrKey = ''; // 降频：屏幕自适应按内容去重，仅 fps/码率/分辨率/衰减真正变化才打
 let _lastWatchKey = ''; // 防止监看端上报日志刷屏：仅在屏/缩放变化时打印
+// Canvas 裁切（发送端按监看端放大的局部裁切传输）
+let szAmSender = false;     // 本端是否正在作为发送端共享屏幕（仅此时才裁切，避免监看端误触发）
+let szLastWatchCrop = null; // 最近一次监看端上报的裁切矩形（归一化）
+let szCropCanvas = null, szCropCtx = null, szCropRaf = 0, szCropOn = false, szCropStream = null, szCropRect = null;
+let szLastCropReqKey = ''; // 区域日志节流：仅区域变化时打四角坐标，避免平移中刷屏
+function szIsCropEnabled() { return (typeof szCropEnabled !== 'undefined') ? !!szCropEnabled : false; }
+// 通知监看端“我正在/已停止裁切”，让其切换显示（避免二次放大）
+function szNotifyCrop(on) {
+  try { if (dc && dc.readyState === 'open') dc.send(JSON.stringify({ type: 'screen-crop', on: !!on })); } catch (e) {}
+}
+// 用 Canvas 仅裁切监看端放大的局部并替换发送轨道（更清晰、省带宽）；裁切矩形变化时逐帧重算
+function szEnableCrop(rect) {
+  if (!szAmSender || !screenLocal || !screenTransceiver) return;
+  szCropRect = rect;
+  if (!szCropCanvas) { szCropCanvas = document.createElement('canvas'); szCropCtx = szCropCanvas.getContext('2d', { alpha: false }); }
+  if (!szCropOn) {
+    szCropOn = true;
+    const fps = Math.max(1, Math.min(30, getScreenFps()));
+    const loop = () => {
+      if (!szCropOn || !szCropRect) return;
+      if (screenLocal.videoWidth) {
+        const sw = screenLocal.videoWidth, sh = screenLocal.videoHeight;
+        const sx = Math.min(sw - 1, Math.max(0, Math.floor(szCropRect.x * sw)));
+        const sy = Math.min(sh - 1, Math.max(0, Math.floor(szCropRect.y * sh)));
+        const cw = Math.min(sw - sx, Math.max(2, Math.floor(szCropRect.w * sw)));
+        const ch = Math.min(sh - sy, Math.max(2, Math.floor(szCropRect.h * sh)));
+        if (szCropCanvas.width !== cw || szCropCanvas.height !== ch) { szCropCanvas.width = cw; szCropCanvas.height = ch; }
+        try { szCropCtx.drawImage(screenLocal, sx, sy, cw, ch, 0, 0, cw, ch); } catch (e) {}
+      }
+      szCropRaf = requestAnimationFrame(loop);
+    };
+    loop();
+  }
+  if (!szCropStream) {
+    const fps = Math.max(1, Math.min(30, getScreenFps()));
+    szCropStream = szCropCanvas.captureStream(fps);
+    szCropStream.getVideoTracks()[0].addEventListener('ended', () => { szCropOn = false; });
+    screenTransceiver.sender.replaceTrack(szCropStream.getVideoTracks()[0])
+      .then(() => logT('Canvas裁切', '已启用 Canvas 裁切传输（局部=监看端放大区域）。', 'info'))
+      .catch((e) => logT('Canvas裁切', 'Canvas 裁切替换轨道失败：' + e.message, 'warn'));
+  }
+  szNotifyCrop(true);
+}
+function szDisableCrop() {
+  if (!szAmSender) return;
+  szCropOn = false;
+  if (szCropRaf) { cancelAnimationFrame(szCropRaf); szCropRaf = 0; }
+  szCropRect = null;
+  const restore = () => {
+    if (szCropStream) { try { szCropStream.getTracks().forEach((t) => t.stop()); } catch (e) {} szCropStream = null; }
+  };
+  if (screenTransceiver && screenStream) {
+    const orig = screenStream.getVideoTracks()[0];
+    screenTransceiver.sender.replaceTrack(orig).then(restore).catch(restore);
+  } else restore();
+  szNotifyCrop(false);
+}
+// 依据发送端开关 + 最近裁切矩形，决定是否裁切
+function szEvaluateCrop() {
+  if (!szAmSender) return;
+  if (szIsCropEnabled() && szLastWatchCrop && szLastWatchCrop.w > 0 && szLastWatchCrop.h > 0) szEnableCrop(szLastWatchCrop);
+  else szDisableCrop();
+}
+// 接收侧（监看端）收到发送端“正在/已停止裁切”通知
+function onScreenCrop(msg) { if (typeof szSetCropRx === 'function') szSetCropRx(!!(msg && msg.on)); }
 // 由统一衰减系数 D 推算当前码率/帧率/分辨率缩放：applied = 上限 × D
 function screenAbrCurrent() {
   const D = abrDegrade;
@@ -296,10 +361,35 @@ async function applyScreenAbr() {
       p.encodings[0].maxFramerate = cur.fps;
       p.encodings[0].scaleResolutionDownBy = scale;
     });
-  } catch (e) { log('ABR 应用失败：' + e.message, 'warn'); }
+  } catch (e) { logT('ABR', 'ABR 应用失败：' + e.message, 'warn'); }
   const _abrKey = cur.fps + '/' + cur.bitrate + '/' + (1 / scale).toFixed(2) + '/' + abrDegrade.toFixed(2);
-  if (_abrKey !== szLastAbrKey) { szLastAbrKey = _abrKey; log('屏幕自适应 → ' + cur.fps + 'fps / ' + cur.bitrate + 'kbps / 下发分辨率×' + (1 / scale).toFixed(2) +
+  if (_abrKey !== szLastAbrKey) { szLastAbrKey = _abrKey; logT('ABR', '屏幕自适应 → ' + cur.fps + 'fps / ' + cur.bitrate + 'kbps / 下发分辨率×' + (1 / scale).toFixed(2) +
     '（衰减×' + abrDegrade.toFixed(2) + (abrDegrade < ABR_DEGRADE_MAX ? '，弱网降档' : '，满档') + '）', 'info'); }
+}
+// 收到监看端上报的裁切矩形（其放大查看的局部）：发送端若已开启“Canvas 裁切”，则按此裁切传输，否则发送全屏。
+// 由 onScreenWatchInfo 与 onScreenAbr 共用——监看端的 crop 经 screen-watch-info 上报，卡顿降档（screen-abr）也顺带刷新，故两处都应用。
+function applyWatchCrop(msg) {
+  if (msg && msg.crop) {
+    szLastWatchCrop = msg.crop;
+    const r = msg.crop;
+    const key = r.x.toFixed(3) + ',' + r.y.toFixed(3) + ',' + r.w.toFixed(3) + ',' + r.h.toFixed(3);
+    if (key !== szLastCropReqKey) { // 仅在区域变化时打，避免平移中刷屏
+      szLastCropReqKey = key;
+      const sw = (screenLocal && screenLocal.videoWidth) ? screenLocal.videoWidth : 0;
+      const sh = (screenLocal && screenLocal.videoHeight) ? screenLocal.videoHeight : 0;
+      const x1 = Math.round(r.x * sw), y1 = Math.round(r.y * sh);
+      const x2 = Math.round((r.x + r.w) * sw), y2 = Math.round(r.y * sh);
+      const x3 = Math.round(r.x * sw), y3 = Math.round((r.y + r.h) * sh);
+      const x4 = Math.round((r.x + r.w) * sw), y4 = Math.round((r.y + r.h) * sh);
+      logT('Canvas裁切', '监看端要求区域 源 ' + sw + '×' + sh +
+        ' 归一(x,y,w,h)=' + r.x + ',' + r.y + ',' + r.w + ',' + r.h +
+        ' | 左上(' + x1 + ',' + y1 + ') 右上(' + x2 + ',' + y2 + ') 左下(' + x3 + ',' + y3 + ') 右下(' + x4 + ',' + y4 + ')', 'info');
+    }
+  } else {
+    szLastWatchCrop = null;
+    if (szLastCropReqKey) { szLastCropReqKey = ''; logT('Canvas裁切', '监看端取消局部要求，恢复全屏传输。', 'info'); }
+  }
+  szEvaluateCrop();
 }
 // 收到监看端指令：卡顿降一档 / 恢复升一档（统一衰减系数 D）
 function onScreenAbr(msg) {
@@ -310,6 +400,8 @@ function onScreenAbr(msg) {
     abrDegrade = Math.min(ABR_DEGRADE_MAX, abrDegrade + ABR_DEGRADE_STEP);
   }
   applyScreenAbr();
+  // 注意：卡顿降档消息(screen-abr)只带 dir，不带 crop。裁切区域由 screen-watch-info 单独驱动，
+  // 这里绝不能调用 applyWatchCrop，否则会把已生效的局部要求当成“无 crop”而取消（回归 bug）。
 }
 // 收到监看端屏幕分辨率/缩放：按监看端分辨率自适应下发，并按缩放提升清晰度
 function onScreenWatchInfo(msg) {
@@ -326,15 +418,16 @@ function onScreenWatchInfo(msg) {
   const key = (msg ? msg.w : 0) + 'x' + (msg ? msg.h : 0) + 'z' + Math.round(abrZoomBoost * 100);
   if (key !== _lastWatchKey) {
     _lastWatchKey = key;
-    log('监看端上报 屏=' + (msg ? msg.w : '?') + '×' + (msg ? msg.h : '?') + ' 缩放×' + abrZoomBoost.toFixed(2) +
+    logT('监看', '监看端上报 屏=' + (msg ? msg.w : '?') + '×' + (msg ? msg.h : '?') + ' 缩放×' + abrZoomBoost.toFixed(2) +
       ' → 自适应基准 abrWatchScale=' + abrWatchScale.toFixed(2) + '（下发上限=' + (1 / abrWatchScale).toFixed(2) + '×源）', 'info');
   }
   applyScreenAbr();
+  applyWatchCrop(msg); // 关键：监看端把裁切矩形放在 screen-watch-info 里上报，必须在这里应用（之前只在 screen-abr 里读，导致区域从未生效）
 }
 
 async function startScreenShare() {
   if (!pc || (pc.connectionState !== 'connected' && pc.connectionState !== 'connecting')) {
-    log('连接未建立，无法共享屏幕。', 'err'); return;
+    logT('屏幕共享', '连接未建立，无法共享屏幕。', 'err'); return;
   }
   const fps = getScreenFps();
   let stream;
@@ -343,13 +436,13 @@ async function startScreenShare() {
       video: { frameRate: { ideal: fps } }, // 不写死宽高，按显示器原生分辨率采集（2K/4K 均可，由 ABR 按监看端屏幕/缩放再调整）
       audio: false
     });
-  } catch (e) { log('屏幕共享被取消或失败：' + e.message, 'warn'); return; }
+  } catch (e) { logT('屏幕共享', '屏幕共享被取消或失败：' + e.message, 'warn'); return; }
   await beginScreenShare(stream);
 }
 // 用给定流开始/接续屏幕共享（手动点“开始共享”与“连接后自动共享”共用）
 async function beginScreenShare(stream) {
   if (!pc || (pc.connectionState !== 'connected' && pc.connectionState !== 'connecting')) {
-    log('连接未建立，无法共享屏幕。', 'err'); return;
+    logT('屏幕共享', '连接未建立，无法共享屏幕。', 'err'); return;
   }
   const fps = getScreenFps();
   const kbps = parseInt(screenBitrate.value, 10) || 1500;
@@ -359,10 +452,13 @@ async function beginScreenShare(stream) {
   abrBaseFps = fps; abrBaseBitrate = kbps;
   abrDegrade = ABR_DEGRADE_MAX; // 满档（衰减系数=1.0），弱网降、恢复升
   abrWatchScale = 1; abrZoomBoost = 1;
+  szAmSender = true; // 标记本端为发送端，仅此时才允许 Canvas 裁切
+  const szCropR = document.getElementById('szCropRow'); if (szCropR) szCropR.classList.add('hidden'); // 开始共享后隐藏“Canvas 裁切”开关
+  szLastWatchCrop = null; szDisableCrop(); // 复位裁切（尚未收到监看端放大指令，先按全屏）
   screenStream = stream;
   const track = stream.getVideoTracks()[0];
   if (screenTransceiver) {
-    try { await screenTransceiver.sender.replaceTrack(track); } catch (e) { log('接入屏幕轨道失败：' + e.message, 'err'); return; }
+    try { await screenTransceiver.sender.replaceTrack(track); } catch (e) { logT('屏幕共享', '接入屏幕轨道失败：' + e.message, 'err'); return; }
   } else {
     screenSender = pc.addTrack(track, stream);
     screenTransceiver = pc.getTransceivers().find((t) => t.sender === screenSender);
@@ -376,7 +472,7 @@ async function beginScreenShare(stream) {
   screenLocal.classList.remove('hidden');
   track.addEventListener('ended', () => stopScreenShare());
   if (dc && dc.readyState === 'open') dc.send(JSON.stringify({ type: 'screen-start' }));
-  log('已开始屏幕共享（' + fps + 'fps / ' + kbps + 'kbps）。', 'ok');
+  logT('屏幕共享', '已开始屏幕共享（' + fps + 'fps / ' + kbps + 'kbps）。', 'ok');
 }
 // 身份页“先选好要共享的屏幕”：提前捕获并暂存，连接成功后自动 beginScreenShare
 async function pickScreenBeforeConnect() {
@@ -385,7 +481,7 @@ async function pickScreenBeforeConnect() {
     pendingScreenStream = null;
     preShareStatus.textContent = '';
     btnPreShare.textContent = '🖥️ 先选好要共享的屏幕（连接后自动共享）';
-    log('已取消预选屏幕。', 'info');
+    logT('屏幕共享', '已取消预选屏幕。', 'info');
     return;
   }
   let stream;
@@ -393,18 +489,18 @@ async function pickScreenBeforeConnect() {
     stream = await navigator.mediaDevices.getDisplayMedia({
       video: { frameRate: { ideal: 10 } }, audio: false // 同上，按原生分辨率采集，避免把源钉死在 1080p
     });
-  } catch (e) { log('屏幕预选被取消或失败：' + e.message, 'warn'); return; }
+  } catch (e) { logT('屏幕共享', '屏幕预选被取消或失败：' + e.message, 'warn'); return; }
   pendingScreenStream = stream;
   const name = stream.getVideoTracks()[0].label || '屏幕';
   preShareStatus.textContent = '已选好：' + name + '，连接后将自动共享给对方。';
   btnPreShare.textContent = '✕ 取消预选屏幕（' + name + '）';
-  log('已预选共享屏幕：' + name + '（连接后自动开始）。', 'ok');
+  logT('屏幕共享', '已预选共享屏幕：' + name + '（连接后自动开始）。', 'ok');
   stream.getVideoTracks()[0].addEventListener('ended', () => {
     if (pendingScreenStream !== stream) return;
     pendingScreenStream = null;
     preShareStatus.textContent = '';
     btnPreShare.textContent = '🖥️ 先选好要共享的屏幕（连接后自动共享）';
-    log('预选的屏幕共享已停止（画面被关闭）。', 'info');
+    logT('屏幕共享', '预选的屏幕共享已停止（画面被关闭）。', 'info');
   });
 }
 async function stopScreenShare() {
@@ -413,13 +509,16 @@ async function stopScreenShare() {
   screenStream = null;
   if (screenTransceiver) { try { await screenTransceiver.sender.replaceTrack(null); } catch (e) {} }
   screenSender = null;
+  szAmSender = false; // 退出发送端，禁止裁切
+  szDisableCrop();    // 停止裁切循环并恢复（若仍被引用）
+  const szCropR = document.getElementById('szCropRow'); if (szCropR) szCropR.classList.remove('hidden'); // 停止共享后恢复显示“Canvas 裁切”开关
   screenStart.classList.remove('hidden');
   screenStop.classList.add('hidden');
   screenLocal.classList.add('hidden'); screenLocal.srcObject = null;
   stopScreenSendMonitor(); // 停止发送端统计
   abrDegrade = ABR_DEGRADE_MAX; abrWatchScale = 1; abrZoomBoost = 1; // 复位为满档
   if (dc && dc.readyState === 'open') dc.send(JSON.stringify({ type: 'screen-stop' }));
-  log('已停止屏幕共享（可再次开始，无需重新协商）。', 'info');
+  logT('屏幕共享', '已停止屏幕共享（可再次开始，无需重新协商）。', 'info');
 }
 // 通过 DataChannel 在已连接的两端之间重新协商（无需再次带外交换）
 async function reneg() {
@@ -428,7 +527,7 @@ async function reneg() {
     await pc.setLocalDescription(offer);
     await waitIceComplete(pc);
     if (dc && dc.readyState === 'open') dc.send(JSON.stringify({ type: 'sdp-offer', sdp: pc.localDescription.sdp }));
-  } catch (e) { log('屏幕共享重协商失败：' + e.message, 'err'); }
+  } catch (e) { logT('屏幕共享', '屏幕共享重协商失败：' + e.message, 'err'); }
 }
 async function onSdpOffer(msg) {
   try {
@@ -437,11 +536,11 @@ async function onSdpOffer(msg) {
     await pc.setLocalDescription(answer);
     await waitIceComplete(pc);
     if (dc && dc.readyState === 'open') dc.send(JSON.stringify({ type: 'sdp-answer', sdp: pc.localDescription.sdp }));
-  } catch (e) { log('处理屏幕协商失败：' + e.message, 'err'); }
+  } catch (e) { logT('屏幕共享', '处理屏幕协商失败：' + e.message, 'err'); }
 }
 async function onSdpAnswer(msg) {
   try { await pc.setRemoteDescription({ type: 'answer', sdp: msg.sdp }); }
-  catch (e) { log('屏幕协商应答失败：' + e.message, 'err'); }
+  catch (e) { logT('屏幕共享', '屏幕协商应答失败：' + e.message, 'err'); }
 }
 // ---------- 监看端防休眠（Screen Wake Lock API） ----------
 // 监看期间保持屏幕常亮，避免监控中被系统息屏。浏览器不支持时静默跳过（如 Firefox、非 HTTPS 环境）。
@@ -451,8 +550,8 @@ async function requestScreenWakeLock() {
   try {
     screenWakeLock = await navigator.wakeLock.request('screen');
     screenWakeLock.addEventListener('release', () => { screenWakeLock = null; }, { once: true });
-    log('已开启防休眠（屏幕常亮）。', 'info');
-  } catch (e) { screenWakeLock = null; log('防休眠请求失败：' + e.message, 'warn'); }
+    logT('屏幕共享', '已开启防休眠（屏幕常亮）。', 'info');
+  } catch (e) { screenWakeLock = null; logT('屏幕共享', '防休眠请求失败：' + e.message, 'warn'); }
 }
 function releaseScreenWakeLock() {
   if (screenWakeLock) { try { screenWakeLock.release(); } catch (e) {} screenWakeLock = null; }
@@ -465,6 +564,7 @@ function onScreenStart() {
   goPage('page-screen');
   screenShareWrap.classList.add('hidden');
   screenWatchWrap.classList.remove('hidden');
+  if (typeof szSetCropRx === 'function') szSetCropRx(false); // 进入监看先按全屏显示，待发送端裁切后再切 fit
   if (typeof szReset === 'function') szReset();
   if (typeof playWatchVideo === 'function') playWatchVideo(); // 面板可见后补播，避免隐藏态 play 被忽略
   szWatchActive = true; // 标记监看中，通道重开后自动补发 watch-info
@@ -474,12 +574,12 @@ function onScreenStart() {
   // 黑屏诊断：5s 后若仍无画面，给出提示（多为隐藏态 play 被忽略或协商未就绪）
   setTimeout(() => {
     if (screenWatchVideo.srcObject && screenWatchVideo.readyState < 2 && !screenWatchWrap.classList.contains('hidden')) {
-      log('监看画面仍未出帧，可尝试双击画面或重进全屏以触发播放。', 'warn');
+      logT('屏幕共享', '监看画面仍未出帧，可尝试双击画面或重进全屏以触发播放。', 'warn');
     }
   }, 5000);
   screenStatus.textContent = '对方正在共享屏幕，等待画面…';
   toast('对方开始共享屏幕，已为你打开监看页');
-  log('对方开始共享屏幕，已为你打开监看页。', 'info');
+  logT('屏幕共享', '对方开始共享屏幕，已为你打开监看页。', 'info');
 }
 // 监看端上报：本机屏幕分辨率 + 当前缩放。发送端据此降分辨率下发（省带宽）并按缩放提升清晰度。
 function sendWatchInfo(zoom) {
@@ -487,14 +587,25 @@ function sendWatchInfo(zoom) {
   szLastWatchZoom = z; // 缓存最新值，断线/未就绪时也保留，重连或重试时补发
   if (!szWatchActive) return; // 未进入监看会话（启动期/未连接/已退出）不上报，也不打 warn、不起重试定时器；进入会话后首报由 onScreenStart 触发
   try {
-    if (!dc || dc.readyState !== 'open') { log('上报跳过：dc 未就绪（state=' + (dc ? dc.readyState : 'null') + '），将重试', 'warn'); scheduleWatchRetry(); return; } // 断线不丢：缓存并定时补发
+    if (!dc || dc.readyState !== 'open') { logT('监看', '上报跳过：dc 未就绪（state=' + (dc ? dc.readyState : 'null') + '），将重试', 'warn'); scheduleWatchRetry(); return; } // 断线不丢：缓存并定时补发
     // 上报本机显示器分辨率作为“可显示上限”：无论面板大小/全屏/横屏，都按显示器实际尺寸，
     // 不会因面板小就降分辨率；横屏方向锁后 window.screen 宽高互换由接收侧用 max 适配。
     const dpr = window.devicePixelRatio || 1; // 用物理像素，规避系统显示缩放（如 150% 缩放下 CSS 像素仅 1280，乘 DPR 才回到真实 1080p）
-    log('上报监看端 zoom=' + z.toFixed(2), 'info');
-    dc.send(JSON.stringify({ type: 'screen-watch-info', w: Math.round(window.screen.width * dpr), h: Math.round(window.screen.height * dpr), zoom: z }));
+    logT('监看', '上报监看端 zoom=' + z.toFixed(2), 'info');
+    // crop：监看端放大查看局部时，算出全屏源归一化矩形一并上报；发送端开启“Canvas 裁切”才会用，否则按全屏传。始终上报（不依赖本端复选框，裁切由发送端决定）。
+    const crop = (typeof szGetCropRect === 'function') ? szGetCropRect() : null;
+    if (!crop && z > 1) {
+      logT('监看', '监看端裁切矩形为 null：szScale=' + z.toFixed(2) +
+        ' videoW=' + (screenWatchVideo ? screenWatchVideo.videoWidth : '?') +
+        ' videoH=' + (screenWatchVideo ? screenWatchVideo.videoHeight : '?') +
+        ' stage=' + (screenWatchStage ? screenWatchStage.clientWidth : '?') + '×' + (screenWatchStage ? screenWatchStage.clientHeight : '?') +
+        ' cropRx=' + szCropRxActive, 'warn');
+    }
+    const payload = { type: 'screen-watch-info', w: Math.round(window.screen.width * dpr), h: Math.round(window.screen.height * dpr), zoom: z };
+    if (crop) payload.crop = crop;
+    dc.send(JSON.stringify(payload));
     stopWatchRetry();
-  } catch (e) { log('上报异常：' + e.message, 'warn'); scheduleWatchRetry(); }
+  } catch (e) { logT('监看', '上报异常：' + e.message, 'warn'); scheduleWatchRetry(); }
 }
 // dc 暂不可用时，每 500ms 重试补发最新 zoom（最多 ~20s），避免上报被断线吞掉
 function scheduleWatchRetry() {
@@ -503,13 +614,14 @@ function scheduleWatchRetry() {
   szWatchRetryTimer = setInterval(() => {
     attempt++;
     if (dc && dc.readyState === 'open') { stopWatchRetry(); sendWatchInfo(szLastWatchZoom); }
-    else if (attempt >= 40) { stopWatchRetry(); log('上报重试超时（dc 仍不可用），已放弃本次 zoom 上报。', 'warn'); }
+    else if (attempt >= 40) { stopWatchRetry(); logT('监看', '上报重试超时（dc 仍不可用），已放弃本次 zoom 上报。', 'warn'); }
   }, 500);
 }
 function stopWatchRetry() { if (szWatchRetryTimer) { clearInterval(szWatchRetryTimer); szWatchRetryTimer = null; } }
 function onScreenStop() {
   szWatchActive = false; stopWatchRetry(); // 退出监看，停止上报重试
   szStopQualityMonitor(); // 停止画质检测
+  if (typeof szSetCropRx === 'function') szSetCropRx(false); // 恢复全屏显示
   screenWatchWrap.classList.add('hidden');
   // 对方停止共享后，恢复本端“开始共享”入口（onScreenStart 曾为“观看时不可分享”而隐藏它）
   if (!screenStream) screenShareWrap.classList.remove('hidden');
@@ -519,7 +631,7 @@ function onScreenStop() {
   try { screenWatchVideo.pause(); } catch (e) {} // 停止解码，节省资源
   releaseScreenWakeLock(); // 结束监看，解除防休眠
   screenStatus.textContent = '对方已停止共享。'; if (screenStats) screenStats.textContent = '';
-  log('对方停止了屏幕共享。', 'info');
+  logT('监看', '对方停止了屏幕共享。', 'info');
 }
 
 // ---------- 发送端统计：screenLocal 上方显示“发出去”的分辨率/码率/帧率 ----------
@@ -642,7 +754,7 @@ async function szQualityTick() {
         dc.send(JSON.stringify({ type: 'screen-request-keyframe' })); // 真损坏：关键帧自愈
         dc.send(JSON.stringify({ type: 'screen-abr', dir: 'down' }));  // 卡顿：降一档（阶梯下降）
       }
-      log('检测到屏幕画面异常（损坏帧+' + dC + '，丢包+' + dL + '，出帧+' + dD + '），已请求降级并修复关键帧。', 'warn');
+      logT('屏幕共享', '检测到屏幕画面异常（损坏帧+' + dC + '，丢包+' + dL + '，出帧+' + dD + '），已请求降级并修复关键帧。', 'warn');
     }
   } else {
     // 持续良好（6s）后阶梯回升一档，恢复网络后的清晰度/流畅度
@@ -655,18 +767,18 @@ async function szQualityTick() {
 }
 // 发送端：收到关键帧请求后，向编码器申请 IDR 帧（优先 requestKeyFrame，无则参数/重协商兜底）
 async function onScreenRequestKeyframe() {
-  if (!screenTransceiver || !screenTransceiver.sender) { log('收到关键帧请求，但当前未共享屏幕。', 'warn'); return; }
+  if (!screenTransceiver || !screenTransceiver.sender) { logT('屏幕共享', '收到关键帧请求，但当前未共享屏幕。', 'warn'); return; }
   const sender = screenTransceiver.sender;
-  try { if (typeof sender.requestKeyFrame === 'function') { sender.requestKeyFrame(); log('已请求编码器发送关键帧。', 'info'); return; } }
-  catch (e) { log('requestKeyFrame 失败：' + e.message, 'warn'); }
+  try { if (typeof sender.requestKeyFrame === 'function') { sender.requestKeyFrame(); logT('屏幕共享', '已请求编码器发送关键帧。', 'info'); return; } }
+  catch (e) { logT('屏幕共享', 'requestKeyFrame 失败：' + e.message, 'warn'); }
   // 兜底：通过调整编码参数尝试触发 IDR（部分实现无 requestKeyFrame 时有效）。临时抬高 maxBitrate，
   // 随后的 applyScreenAbr 会经同一队列把码率恢复为当前档位，无需此处手动还原；只调用一次 setParameters 避免事务复用报错。
   try {
     await szSetSenderParams(p => {
       if (p.encodings && p.encodings[0]) p.encodings[0].maxBitrate = Math.max(p.encodings[0].maxBitrate || 2000000, 4000000);
     });
-    log('已通过编码参数调整请求关键帧（兜底）。', 'info');
-  } catch (e2) { log('关键帧兜底失败：' + e2.message, 'warn'); }
+    logT('屏幕共享', '已通过编码参数调整请求关键帧（兜底）。', 'info');
+  } catch (e2) { logT('屏幕共享', '关键帧兜底失败：' + e2.message, 'warn'); }
 }
 
 // ---------- 剪贴板同步 ----------
@@ -677,11 +789,11 @@ let clipAutoTimer = null;
 async function sendClipboard(auto, presetText) {
   const text = (presetText != null) ? presetText : clipLocal.value;
   if (!text) { if (!auto) toast('没有可同步的内容'); return; }
-  if (!dc || dc.readyState !== 'open') { if (!auto) log('连接未建立，无法同步。', 'err'); return; }
+  if (!dc || dc.readyState !== 'open') { if (!auto) logT('剪贴板', '连接未建立，无法同步。', 'err'); return; }
   dc.send(JSON.stringify({ type: 'clipboard', text, auto: !!auto }));
   clipLastSeen = text;
   if (!auto) toast('已同步给对方');
-  log((auto ? '（自动）' : '') + '已同步剪贴板给对方。', 'ok');
+  logT('剪贴板', (auto ? '（自动）' : '') + '已同步剪贴板给对方。', 'ok');
 }
 function onClipboard(msg) {
   const text = msg.text || '';
@@ -695,7 +807,7 @@ function onClipboard(msg) {
   } else {
     toast('收到对方剪贴板（点“复制对方内容”手动复制）');
   }
-  log('收到对方' + (msg.auto ? '（自动）' : '') + '同步的剪贴板内容。', 'info');
+  logT('剪贴板', '收到对方' + (msg.auto ? '（自动）' : '') + '同步的剪贴板内容。', 'info');
 }
 
 // 自动监听：本机剪贴板变化时自动发给对方（手动“同步给对方”按钮保留）
@@ -713,11 +825,11 @@ async function pollClipboard() {
 function startClipAuto() {
   if (clipAutoTimer) return;
   clipAutoTimer = setInterval(pollClipboard, 1200);
-  log('已开启剪贴板自动监听：本机复制内容会自动发给对方。', 'ok');
+  logT('剪贴板', '已开启剪贴板自动监听：本机复制内容会自动发给对方。', 'ok');
 }
 function stopClipAuto() {
   if (clipAutoTimer) { clearInterval(clipAutoTimer); clipAutoTimer = null; }
-  log('已关闭剪贴板自动监听。', 'info');
+  logT('剪贴板', '已关闭剪贴板自动监听。', 'info');
 }
 
 // ---------- 聊天容量 ----------
