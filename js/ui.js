@@ -56,7 +56,7 @@ function clearChat() {
 function initUI() {
   if (!hasSubtle) {
     encToggle.checked = false; encToggle.disabled = true;
-    encToggle.parentElement.title = '当前非安全上下文（需 HTTPS/localhost），加密与校验和不可用，仅复制粘贴传输不受影响。';
+    encToggle.parentElement.title = '当前非安全上下文（需 HTTPS/localhost），可选 AES-GCM（文件/聊天）与校验和不可用；传输仍由 WebRTC DTLS-SRTP 加密，复制粘贴信令不受影响。';
   }
   if (!hasFSAccess) {
     streamingMode = false;
@@ -151,7 +151,7 @@ function initUI() {
 
   preRequestCamera();
   updateChatCap();
-  log('就绪。请选择角色开始。安全上下文：' + (hasSubtle ? '是（加密可用）' : '否（仅明文传输）'), 'info');
+  log('就绪。请选择角色开始。安全上下文：' + (hasSubtle ? '是（AES-GCM 可用）' : '否（AES-GCM 不可用，传输仍 DTLS-SRTP 加密）'), 'info');
 }
 
 // ---------- 屏幕监看全屏 ----------

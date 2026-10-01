@@ -7,7 +7,7 @@
 - 对称对等：两端角色对等，均可收发文件。
 - 手动信令：会话码通过**复制粘贴**或**二维码**在带外交换，不经过任何第三方服务器。
 - 可靠传输：`{ ordered: true }` 有序可靠 DataChannel；**64KB 分块** + **背压控制**（监控 `bufferedAmount`）。
-- 端到端加密（可选）：AES-GCM 256，密钥随会话码手动交换；并内置会话指纹（MITM）校验。
+- 端到端加密（可选）：**文件与聊天**数据可叠加 AES-GCM 256 双层加密，密钥随会话码手动交换；所有功能（文件 / 屏幕共享 / 通话 / 聊天）另受 WebRTC 原生 DTLS-SRTP 传输加密保护，并内置会话指纹（MITM）校验——指纹不匹配即关闭通道。
 - 完整性校验：发送端计算 SHA-256 并随元信息下发，接收端组装后比对。
 - 断点续传：同一连接内，接收端在收到 `file-complete` 后若发现缺块，通过 `resume-request` 仅请求缺失分块，发送端 `onResumeRequest` 补传（不重发整文件）。已收分块同时写入 **IndexedDB** 留档。
 - 大文件流式写盘（可选，默认开启）：接收端通过 **File System Access API**（`showSaveFilePicker` + 可写流）将分块**边收边存**到磁盘，全程不把整文件放入内存，彻底避免 `out of memory`。从磁盘流式读取做 SHA-256 校验，**不占用内存**。需 Chrome / Edge 且安全上下文（localhost / HTTPS）。不支持的浏览器自动回退为「内存拼装后下载」（大文件可能内存溢出）。
@@ -67,7 +67,7 @@ js/vendor/jsQR.js       二维码扫描（jsQR, Apache-2.0）
 - **信令压缩**：新码默认采用**自研 LZH（LZ77 + 哈夫曼，纯 JS，见 `js/lzh.js`）**压缩，零浏览器依赖，旧 Safari 等也可压可解。会话码以 Base64URL 承载，正文首位为格式标识：`3`=LZH 压缩、`2`=浏览器原生 `deflate-raw`、`1`=gzip、`0`=明文（`1/2` 仅为旧码兼容保留，新生成一律 `3`）；SDP 内联字段（`z`）同样用 LZH，并以 `c:'lzh'` 标记。SDP 仅剔除候选行 / 指纹行 / 可选行（extmap、rtcp-fb、rtcp-rsize）；压缩无收益时自动回退明文（纯 Base64URL）。
 - **分块帧**：明文 `tag(1)+chunkIndex(4)+fileId(4)+payload`；加密 `tag(1)+chunkIndex(4)+fileId(4)+ivRandom(8)+密文`，IV 由「分块索引 + 8 字节随机数」构成。
 - **背压**：`send()` 只是把分块塞进发送缓冲区就返回，而非真正发出。`bufferedAmount` 表示「已发但未确认送达」的字节数；当其超过 **16MB** 阈值（网络跟不上发送速度）时暂停发送并轮询，待缓冲消化到阈值以下再继续。这样内存占用有上限，发送速率自动贴近真实网络吞吐，避免几 GB 文件把内存撑爆。
-- **安全**：可选 AES-GCM 双层加密；连接建立后交换 `sessionFingerprint` 比对，不一致即判定中间人攻击并关闭通道。
+- **安全**：整条连接（文件 / 屏幕共享 / 通话 / 聊天）均受 **WebRTC 原生 DTLS-SRTP** 传输加密保护；连接建立后双方交换 `sessionFingerprint`（DTLS 证书指纹）比对，不一致即判定中间人攻击并关闭通道——该 MITM 检查对连接内所有流量生效。此外，**文件与聊天**数据可再叠加一层**可选 AES-GCM 双层加密**（应用层）；屏幕共享 / 通话的媒体流走 DTLS-SRTP，不单独走该 AES-GCM 开关。
 - **断点续传**：每收到分块即 `idbSaveChunk` 写入 IndexedDB，元信息 `idbSaveMeta`；接收端在 `file-complete` 后计算缺失分块并 `resume-request` 补传，发送端 `onResumeRequest` 仅重发缺失分块。**注意**：此续传仅在连接保持时有效——页面刷新会断开连接，且当前重连不会从 IndexedDB 恢复（历史面板 `idbGetAll` / `loadHistory` 已停用），刷新后需整体重传。（如果发送方刷新后没有重新发送，接收方压根无法断点续传）
 
 ## 已知限制
