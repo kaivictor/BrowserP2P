@@ -2,7 +2,7 @@ name: Deploy static site to GitHub Pages
 
 on:
   push:
-    branches: [ master ]   # 若默认分支是 main，请改成 main
+    branches: [ main ]   # 仓库默认分支为 main（远程 origin/main），推到 main 即触发部署
   workflow_dispatch:        # 允许在 Actions 页面手动触发
 
 # 允许 GITHUB_TOKEN 部署到 Pages
