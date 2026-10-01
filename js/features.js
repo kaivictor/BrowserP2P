@@ -1,4 +1,5 @@
 // features.js —— 二维码 / 扫码 / 屏幕共享 / 剪贴板同步 / 聊天容量 / 复制提示
+log('[features.js] 已加载 v=71', 'info'); // 自证：日志首行显示此版本，说明手机跑的是新版；若看不到这行=旧缓存
 
 // ---------- 二维码（自动分块） ----------
 const CHUNK_MAGIC = '~BS1~';   // 分块二维码魔标，区别于完整单张载荷
@@ -190,9 +191,18 @@ function onCopied(okMsg) {
 
 // 记录用户设置的屏幕共享帧率/码率，作为下次默认值（localStorage 持久化）
 const SCREEN_PROFILE_KEY = 'bsScreenProfile';
+// 取“有效帧率”：选“自定义”时读 screenFpsCustom 输入框，否则读下拉值
+function getScreenFps() {
+  if (screenFps.value === 'custom') {
+    const v = parseInt(screenFpsCustom.value, 10);
+    return (isNaN(v) || v < 1) ? 10 : v;
+  }
+  const v = parseInt(screenFps.value, 10);
+  return isNaN(v) ? 10 : v;
+}
 function saveScreenProfile() {
   try {
-    const fps = parseInt(screenFps.value, 10);
+    const fps = getScreenFps();
     const kbps = parseInt(screenBitrate.value, 10);
     const mode = (screenMode && screenMode.value) ? screenMode.value : 'smooth';
     localStorage.setItem(SCREEN_PROFILE_KEY, JSON.stringify({
@@ -207,8 +217,13 @@ function loadScreenProfile() {
     const raw = localStorage.getItem(SCREEN_PROFILE_KEY);
     if (!raw) return;
     const p = JSON.parse(raw);
-    if (p && typeof p.fps === 'number' && screenFps.querySelector('option[value="' + p.fps + '"]')) {
-      screenFps.value = String(p.fps);
+    if (p && typeof p.fps === 'number') {
+      if (screenFps.querySelector('option[value="' + p.fps + '"]')) {
+        screenFps.value = String(p.fps);
+      } else {
+        screenFps.value = 'custom';
+        if (screenFpsCustom) { screenFpsCustom.value = String(p.fps); screenFpsCustom.classList.remove('hidden'); }
+      }
     }
     if (p && typeof p.kbps === 'number') {
       screenBitrate.value = String(p.kbps);
@@ -224,52 +239,75 @@ loadScreenProfile(); // 启动时恢复上次设置的默认值
 // 状态保存在“发送端”。监看端检测到卡顿/恢复后，通过 DataChannel 下发 dir:down/up 指令。
 let abrMode = 'smooth';          // 'smooth'(降码率优先) | 'clear'(降帧率优先)
 let abrBaseBitrate = 1500, abrBaseFps = 10;
-let abrBitrateStep = 0, abrFpsStep = 0; // 阶梯步数（每步 5%）
-let abrWatchScale = 1;  // 监看端屏幕更小 -> 降分辨率下发（>=1）
+let abrDegrade = 1.0;       // 统一衰减系数：1.0(满档) → 0.95 → 0.90 → 0.85 → …（弱网降、恢复升）
+const ABR_DEGRADE_STEP = 0.05, ABR_DEGRADE_MIN = 0.5, ABR_DEGRADE_MAX = 1.0;
+let abrWatchScale = 1;  // 监看端屏幕更小 -> 降分辨率下发（>=1，即分辨率的“上限”基准）
 let abrZoomBoost = 1;   // 监看端缩放 -> 提高下发分辨率，使放大区更清晰（>1）
-// 由阶梯步数推算当前码率/帧率/分辨率缩放（取整、设下限）
+let szLastWatchZoom = 1, szWatchRetryTimer = null, szWatchActive = false; // 断线缓存最新 zoom 并定时重试补发；仅在监看中才上报
+let szLastAbrKey = ''; // 降频：屏幕自适应按内容去重，仅 fps/码率/分辨率/衰减真正变化才打
+let _lastWatchKey = ''; // 防止监看端上报日志刷屏：仅在屏/缩放变化时打印
+// 由统一衰减系数 D 推算当前码率/帧率/分辨率缩放：applied = 上限 × D
 function screenAbrCurrent() {
-  let bitrate, fps, resSteps;
-  if (abrMode === 'smooth') {
-    bitrate = abrBaseBitrate * Math.pow(0.95, abrBitrateStep);
-    fps = abrBaseFps * Math.pow(0.95, Math.floor(abrBitrateStep / 2)); // 每降10%码率->降5%帧率
-    resSteps = Math.floor(abrBitrateStep / 4);                        // 每降20%码率->降10%分辨率
+  const D = abrDegrade;
+  let fps, bitrate;
+  if (D >= ABR_DEGRADE_MAX) {
+    // 满档：帧率/码率放开到用户设定上限，动态内容可跑满
+    fps = abrBaseFps;
+    bitrate = abrBaseBitrate;
   } else {
-    fps = abrBaseFps * Math.pow(0.95, abrFpsStep);
-    bitrate = abrBaseBitrate * Math.pow(0.95, Math.floor(abrFpsStep / 2)); // 每降10%帧率->降5%码率
-    resSteps = Math.floor(abrFpsStep / 4);                            // 每降20%帧率->降10%分辨率
+    // 降档：以“发送端实际达到”的值（szActual*）为上限锚点，再乘 D，
+    // 这样即便画面静止、实际只有 10fps，弱网卡顿也会真正从 10 往下压（而非相对用户设定值空降）
+    const ceilFps = szActualFps > 0 ? szActualFps : abrBaseFps;
+    const ceilBit = szActualBitrate > 0 ? szActualBitrate : abrBaseBitrate;
+    fps = ceilFps * D;
+    bitrate = ceilBit * D;
   }
   bitrate = Math.max(300, Math.round(bitrate));
   fps = Math.max(5, Math.round(fps));
-  const resScale = Math.pow(1 / 0.9, resSteps); // 分辨率降10%/步 -> scaleResolutionDownBy 增大
+  // 分辨率：上限=基于监看端屏幕分辨率（abrWatchScale），再按 D 降：scaleResolutionDownBy = (1/D)·上限
+  const resScale = 1 / D;
   return { bitrate, fps, resScale };
+}
+// 所有对 screenTransceiver.sender 的 setParameters 必须串行：同一 sender 并发 setParameters 会让 Chromium 的
+// transaction 错乱（报 “getParameters() needs to be called before setParameters()”），且每次都必须重新 getParameters
+// 取最新参数对象（复用已被消费的 transaction 对象也会失败）。统一经此队列串行化并每次刷新参数。
+let szParamChain = Promise.resolve();
+function szSetSenderParams(mutate) {
+  const sender = screenTransceiver && screenTransceiver.sender;
+  if (!sender) return Promise.resolve();
+  const run = async () => {
+    const p = sender.getParameters();
+    if (!p.encodings) p.encodings = [{}];
+    mutate(p);
+    await sender.setParameters(p);
+  };
+  szParamChain = szParamChain.catch(() => {}).then(run); // 一次失败不影响后续排队
+  return szParamChain;
 }
 async function applyScreenAbr() {
   if (!screenTransceiver || !screenTransceiver.sender) return;
   const cur = screenAbrCurrent();
-  // 最终下发缩放 = 分辨率阶梯缩放 × 监看端分辨率缩放 ÷ 缩放放大系数（放大时更清晰，下限1即不超采集分辨率）
+  // 最终下发缩放 = (1/D) × 监看端分辨率缩放 ÷ 缩放放大系数（放大时更清晰，下限1即不超采集分辨率）
   let scale = cur.resScale * abrWatchScale / abrZoomBoost;
   scale = Math.max(1, Math.round(scale * 100) / 100);
   try {
-    const p = screenTransceiver.sender.getParameters();
-    if (!p.encodings) p.encodings = [{}];
-    p.encodings[0].maxBitrate = cur.bitrate * 1000;
-    p.encodings[0].maxFramerate = cur.fps;
-    p.encodings[0].scaleResolutionDownBy = scale;
-    await screenTransceiver.sender.setParameters(p);
+    await szSetSenderParams(p => {
+      p.encodings[0].maxBitrate = cur.bitrate * 1000;
+      p.encodings[0].maxFramerate = cur.fps;
+      p.encodings[0].scaleResolutionDownBy = scale;
+    });
   } catch (e) { log('ABR 应用失败：' + e.message, 'warn'); }
-  log('屏幕自适应 → ' + cur.fps + 'fps / ' + cur.bitrate + 'kbps / 下发分辨率×' + (1 / scale).toFixed(2) +
-    '（' + (abrMode === 'smooth' ? '流畅优先' : '清晰优先') + (abrBitrateStep + abrFpsStep ? '，已降' + (abrBitrateStep + abrFpsStep) + '档' : '') + '）', 'info');
+  const _abrKey = cur.fps + '/' + cur.bitrate + '/' + (1 / scale).toFixed(2) + '/' + abrDegrade.toFixed(2);
+  if (_abrKey !== szLastAbrKey) { szLastAbrKey = _abrKey; log('屏幕自适应 → ' + cur.fps + 'fps / ' + cur.bitrate + 'kbps / 下发分辨率×' + (1 / scale).toFixed(2) +
+    '（衰减×' + abrDegrade.toFixed(2) + (abrDegrade < ABR_DEGRADE_MAX ? '，弱网降档' : '，满档') + '）', 'info'); }
 }
-// 收到监看端指令：卡顿降一档 / 恢复升一档
+// 收到监看端指令：卡顿降一档 / 恢复升一档（统一衰减系数 D）
 function onScreenAbr(msg) {
   if (!screenTransceiver) return;
   if (msg.dir === 'down') {
-    if (abrMode === 'smooth') { if (abrBitrateStep < 40) abrBitrateStep++; }
-    else { if (abrFpsStep < 40) abrFpsStep++; }
+    abrDegrade = Math.max(ABR_DEGRADE_MIN, abrDegrade - ABR_DEGRADE_STEP);
   } else {
-    if (abrMode === 'smooth') abrBitrateStep = Math.max(0, abrBitrateStep - 1);
-    else abrFpsStep = Math.max(0, abrFpsStep - 1);
+    abrDegrade = Math.min(ABR_DEGRADE_MAX, abrDegrade + ABR_DEGRADE_STEP);
   }
   applyScreenAbr();
 }
@@ -281,10 +319,16 @@ function onScreenWatchInfo(msg) {
     const t = screenTransceiver.sender.track;
     const s = t ? t.getSettings() : null;
     if (s && s.width && s.height && msg && msg.w && msg.h) {
-      const ratio = Math.min(s.width / msg.w, s.height / msg.h);
+      const ratio = Math.max(s.width / msg.w, s.height / msg.h); // 用 max 适配方向：保证两维都放得下，避免横屏方向锁后误降分辨率
       if (ratio > 1.05) abrWatchScale = ratio; // 监看屏更小 -> 降分辨率下发，省带宽
     }
   } catch (e) {}
+  const key = (msg ? msg.w : 0) + 'x' + (msg ? msg.h : 0) + 'z' + Math.round(abrZoomBoost * 100);
+  if (key !== _lastWatchKey) {
+    _lastWatchKey = key;
+    log('监看端上报 屏=' + (msg ? msg.w : '?') + '×' + (msg ? msg.h : '?') + ' 缩放×' + abrZoomBoost.toFixed(2) +
+      ' → 自适应基准 abrWatchScale=' + abrWatchScale.toFixed(2) + '（下发上限=' + (1 / abrWatchScale).toFixed(2) + '×源）', 'info');
+  }
   applyScreenAbr();
 }
 
@@ -292,11 +336,11 @@ async function startScreenShare() {
   if (!pc || (pc.connectionState !== 'connected' && pc.connectionState !== 'connecting')) {
     log('连接未建立，无法共享屏幕。', 'err'); return;
   }
-  const fps = parseInt(screenFps.value, 10) || 10;
+  const fps = getScreenFps();
   let stream;
   try {
     stream = await navigator.mediaDevices.getDisplayMedia({
-      video: { frameRate: { ideal: fps }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+      video: { frameRate: { ideal: fps } }, // 不写死宽高，按显示器原生分辨率采集（2K/4K 均可，由 ABR 按监看端屏幕/缩放再调整）
       audio: false
     });
   } catch (e) { log('屏幕共享被取消或失败：' + e.message, 'warn'); return; }
@@ -307,13 +351,14 @@ async function beginScreenShare(stream) {
   if (!pc || (pc.connectionState !== 'connected' && pc.connectionState !== 'connecting')) {
     log('连接未建立，无法共享屏幕。', 'err'); return;
   }
-  const fps = parseInt(screenFps.value, 10) || 10;
+  const fps = getScreenFps();
   const kbps = parseInt(screenBitrate.value, 10) || 1500;
   saveScreenProfile(); // 记录本次实际使用的帧率/码率/模式，作为下次默认
   // 初始化自适应基线（阶梯归零）
   abrMode = (screenMode && screenMode.value) ? screenMode.value : 'smooth';
   abrBaseFps = fps; abrBaseBitrate = kbps;
-  abrBitrateStep = 0; abrFpsStep = 0; abrWatchScale = 1; abrZoomBoost = 1;
+  abrDegrade = ABR_DEGRADE_MAX; // 满档（衰减系数=1.0），弱网降、恢复升
+  abrWatchScale = 1; abrZoomBoost = 1;
   screenStream = stream;
   const track = stream.getVideoTracks()[0];
   if (screenTransceiver) {
@@ -346,7 +391,7 @@ async function pickScreenBeforeConnect() {
   let stream;
   try {
     stream = await navigator.mediaDevices.getDisplayMedia({
-      video: { frameRate: { ideal: 10 }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false
+      video: { frameRate: { ideal: 10 } }, audio: false // 同上，按原生分辨率采集，避免把源钉死在 1080p
     });
   } catch (e) { log('屏幕预选被取消或失败：' + e.message, 'warn'); return; }
   pendingScreenStream = stream;
@@ -372,7 +417,7 @@ async function stopScreenShare() {
   screenStop.classList.add('hidden');
   screenLocal.classList.add('hidden'); screenLocal.srcObject = null;
   stopScreenSendMonitor(); // 停止发送端统计
-  abrBitrateStep = 0; abrFpsStep = 0; abrWatchScale = 1; abrZoomBoost = 1;
+  abrDegrade = ABR_DEGRADE_MAX; abrWatchScale = 1; abrZoomBoost = 1; // 复位为满档
   if (dc && dc.readyState === 'open') dc.send(JSON.stringify({ type: 'screen-stop' }));
   log('已停止屏幕共享（可再次开始，无需重新协商）。', 'info');
 }
@@ -398,14 +443,34 @@ async function onSdpAnswer(msg) {
   try { await pc.setRemoteDescription({ type: 'answer', sdp: msg.sdp }); }
   catch (e) { log('屏幕协商应答失败：' + e.message, 'err'); }
 }
+// ---------- 监看端防休眠（Screen Wake Lock API） ----------
+// 监看期间保持屏幕常亮，避免监控中被系统息屏。浏览器不支持时静默跳过（如 Firefox、非 HTTPS 环境）。
+let screenWakeLock = null;
+async function requestScreenWakeLock() {
+  if (!('wakeLock' in navigator)) return;
+  try {
+    screenWakeLock = await navigator.wakeLock.request('screen');
+    screenWakeLock.addEventListener('release', () => { screenWakeLock = null; }, { once: true });
+    log('已开启防休眠（屏幕常亮）。', 'info');
+  } catch (e) { screenWakeLock = null; log('防休眠请求失败：' + e.message, 'warn'); }
+}
+function releaseScreenWakeLock() {
+  if (screenWakeLock) { try { screenWakeLock.release(); } catch (e) {} screenWakeLock = null; }
+}
+// 页面切回前台时重新申请：wake lock 在页面隐藏时会被浏览器自动释放
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && !screenWatchWrap.classList.contains('hidden')) requestScreenWakeLock();
+});
 function onScreenStart() {
   goPage('page-screen');
   screenShareWrap.classList.add('hidden');
   screenWatchWrap.classList.remove('hidden');
   if (typeof szReset === 'function') szReset();
   if (typeof playWatchVideo === 'function') playWatchVideo(); // 面板可见后补播，避免隐藏态 play 被忽略
+  szWatchActive = true; // 标记监看中，通道重开后自动补发 watch-info
   szStartQualityMonitor(); // 启动监看画质检测（花屏自愈）
   sendWatchInfo(); // 上报本机屏幕分辨率/缩放，发送端据此自适应下发分辨率
+  requestScreenWakeLock(); // 监看期间保持屏幕常亮
   // 黑屏诊断：5s 后若仍无画面，给出提示（多为隐藏态 play 被忽略或协商未就绪）
   setTimeout(() => {
     if (screenWatchVideo.srcObject && screenWatchVideo.readyState < 2 && !screenWatchWrap.classList.contains('hidden')) {
@@ -417,14 +482,33 @@ function onScreenStart() {
   log('对方开始共享屏幕，已为你打开监看页。', 'info');
 }
 // 监看端上报：本机屏幕分辨率 + 当前缩放。发送端据此降分辨率下发（省带宽）并按缩放提升清晰度。
-function sendWatchInfo() {
+function sendWatchInfo(zoom) {
+  const z = (typeof zoom === 'number' && zoom > 0) ? zoom : ((typeof szScale === 'number' && szScale > 0) ? szScale : 1);
+  szLastWatchZoom = z; // 缓存最新值，断线/未就绪时也保留，重连或重试时补发
+  if (!szWatchActive) return; // 未进入监看会话（启动期/未连接/已退出）不上报，也不打 warn、不起重试定时器；进入会话后首报由 onScreenStart 触发
   try {
-    if (!dc || dc.readyState !== 'open') return;
-    const zoom = (typeof szScale === 'number' && szScale > 0) ? szScale : 1;
-    dc.send(JSON.stringify({ type: 'screen-watch-info', w: window.screen.width, h: window.screen.height, zoom }));
-  } catch (e) {}
+    if (!dc || dc.readyState !== 'open') { log('上报跳过：dc 未就绪（state=' + (dc ? dc.readyState : 'null') + '），将重试', 'warn'); scheduleWatchRetry(); return; } // 断线不丢：缓存并定时补发
+    // 上报本机显示器分辨率作为“可显示上限”：无论面板大小/全屏/横屏，都按显示器实际尺寸，
+    // 不会因面板小就降分辨率；横屏方向锁后 window.screen 宽高互换由接收侧用 max 适配。
+    const dpr = window.devicePixelRatio || 1; // 用物理像素，规避系统显示缩放（如 150% 缩放下 CSS 像素仅 1280，乘 DPR 才回到真实 1080p）
+    log('上报监看端 zoom=' + z.toFixed(2), 'info');
+    dc.send(JSON.stringify({ type: 'screen-watch-info', w: Math.round(window.screen.width * dpr), h: Math.round(window.screen.height * dpr), zoom: z }));
+    stopWatchRetry();
+  } catch (e) { log('上报异常：' + e.message, 'warn'); scheduleWatchRetry(); }
 }
+// dc 暂不可用时，每 500ms 重试补发最新 zoom（最多 ~20s），避免上报被断线吞掉
+function scheduleWatchRetry() {
+  if (szWatchRetryTimer) return;
+  let attempt = 0;
+  szWatchRetryTimer = setInterval(() => {
+    attempt++;
+    if (dc && dc.readyState === 'open') { stopWatchRetry(); sendWatchInfo(szLastWatchZoom); }
+    else if (attempt >= 40) { stopWatchRetry(); log('上报重试超时（dc 仍不可用），已放弃本次 zoom 上报。', 'warn'); }
+  }, 500);
+}
+function stopWatchRetry() { if (szWatchRetryTimer) { clearInterval(szWatchRetryTimer); szWatchRetryTimer = null; } }
 function onScreenStop() {
+  szWatchActive = false; stopWatchRetry(); // 退出监看，停止上报重试
   szStopQualityMonitor(); // 停止画质检测
   screenWatchWrap.classList.add('hidden');
   // 对方停止共享后，恢复本端“开始共享”入口（onScreenStart 曾为“观看时不可分享”而隐藏它）
@@ -433,12 +517,14 @@ function onScreenStop() {
   if (typeof exitScreenFs === 'function') exitScreenFs();
   if (typeof szReset === 'function') szReset();
   try { screenWatchVideo.pause(); } catch (e) {} // 停止解码，节省资源
+  releaseScreenWakeLock(); // 结束监看，解除防休眠
   screenStatus.textContent = '对方已停止共享。'; if (screenStats) screenStats.textContent = '';
   log('对方停止了屏幕共享。', 'info');
 }
 
 // ---------- 发送端统计：screenLocal 上方显示“发出去”的分辨率/码率/帧率 ----------
 let szSendTimer = null, szSendBase = false, szSendLastBytes = 0, szSendLastEncoded = 0, szSendLastTs = 0;
+let szActualFps = 0, szActualBitrate = 0; // 发送端实际达到的帧率/码率（供 ABR 以实际为基准降档）
 function startScreenSendMonitor() {
   stopScreenSendMonitor();
   szSendBase = false; szSendLastBytes = 0; szSendLastEncoded = 0; szSendLastTs = 0;
@@ -472,7 +558,13 @@ async function szSendTick() {
   const bitrateKbps = (dt > 0) ? ((bytes - szSendLastBytes) * 8) / dt / 1000 : 0;
   const fpsCalc = (dt > 0) ? (encoded - szSendLastEncoded) / dt : 0;
   szSendLastBytes = bytes; szSendLastEncoded = encoded; szSendLastTs = now;
-  let txt = '发送：';
+  szActualFps = (fps || fpsCalc);      // 记录“发出去”的实际帧率（供 ABR 降档基准）
+  szActualBitrate = bitrateKbps;        // 记录“发出去”的实际码率（供 ABR 降档基准）
+  const cap = screenAbrCurrent();       // 编码器当前天花板（弱网降档后会低于用户设定）
+  const mw = screenLocal.videoWidth, mh = screenLocal.videoHeight; // 采集源原生分辨率 = 可下发最大分辨率
+  let txt = '上限 ';
+  if (mw && mh) txt += mw + '×' + mh + ' · ';
+  txt += cap.fps + 'fps · ' + Math.round(cap.bitrate) + 'kbps ｜ 发送：';
   if (fw && fh) txt += fw + '×' + fh + ' · ';
   txt += Math.round(bitrateKbps) + ' kbps · ' + Math.round(fps || fpsCalc) + ' fps';
   if (screenSendStats) screenSendStats.textContent = txt;
@@ -526,6 +618,7 @@ async function szQualityTick() {
   const dt = (now - szLastTs) / 1000;
   const bitrateKbps = (dt > 0) ? ((bytes - szLastBytes) * 8) / dt / 1000 : 0;
   const fpsCalc = (dt > 0) ? (decoded - szLastDecoded) / dt : 0;
+  const dR = recv - szLastRecv; // RTP 收包增量；出帧停滞但收包仍在=真解码卡死，否则只是源端静止/暂停，不算异常
   szLastBytes = bytes; szLastRecv = recv; szLastTs = now;
   const dC = corrupt - szLastCorrupt, dL = lost - szLastLost, dD = decoded - szLastDecoded;
   szLastCorrupt = corrupt; szLastLost = lost; szLastDecoded = decoded;
@@ -538,8 +631,8 @@ async function szQualityTick() {
   if (totalPkts > 0) statTxt += ' · 丢包 ' + lossPct.toFixed(1) + '%';
   if (rttMs !== null) statTxt += ' · 延迟 ' + Math.round(rttMs) + ' ms';
   if (screenStats) screenStats.textContent = statTxt;
-  // 花屏：出现新损坏帧；或丢包突增且仍在出帧（P 帧依赖丢失数据）；或出帧停滞（解码卡死）
-  const bad = dC > 0 || (dL >= 10 && dD > 0) || (dD === 0 && decoded > 0);
+  // 花屏：出现新损坏帧；或丢包突增且仍在出帧（P 帧依赖丢失数据）；或 RTP 仍在到达但解码不出帧（解码卡死）
+  const bad = dC > 0 || (dL >= 10 && dD > 0) || (dD === 0 && dR > 0 && decoded > 0);
   if (bad) {
     szGoodStreak = 0;
     if (Date.now() - szLastReqAt > 1500) {
@@ -566,16 +659,13 @@ async function onScreenRequestKeyframe() {
   const sender = screenTransceiver.sender;
   try { if (typeof sender.requestKeyFrame === 'function') { sender.requestKeyFrame(); log('已请求编码器发送关键帧。', 'info'); return; } }
   catch (e) { log('requestKeyFrame 失败：' + e.message, 'warn'); }
-  // 兜底：通过调整编码参数尝试触发 IDR（部分实现有效）
+  // 兜底：通过调整编码参数尝试触发 IDR（部分实现无 requestKeyFrame 时有效）。临时抬高 maxBitrate，
+  // 随后的 applyScreenAbr 会经同一队列把码率恢复为当前档位，无需此处手动还原；只调用一次 setParameters 避免事务复用报错。
   try {
-    const p = sender.getParameters();
-    if (p.encodings && p.encodings[0]) {
-      const saved = p.encodings[0].maxBitrate;
-      p.encodings[0].maxBitrate = Math.max(saved || 2000000, 4000000);
-      await sender.setParameters(p);
-      if (saved) { p.encodings[0].maxBitrate = saved; await sender.setParameters(p); }
-      log('已通过编码参数调整请求关键帧（兜底）。', 'info');
-    }
+    await szSetSenderParams(p => {
+      if (p.encodings && p.encodings[0]) p.encodings[0].maxBitrate = Math.max(p.encodings[0].maxBitrate || 2000000, 4000000);
+    });
+    log('已通过编码参数调整请求关键帧（兜底）。', 'info');
   } catch (e2) { log('关键帧兜底失败：' + e2.message, 'warn'); }
 }
 

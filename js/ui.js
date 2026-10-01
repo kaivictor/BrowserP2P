@@ -1,4 +1,5 @@
 // ui.js —— 事件绑定 / 角色流程 / 初始化（最后加载，依赖前面所有脚本）
+log('[ui.js] 已加载 v=58', 'info'); // 自证：日志首行显示此版本，说明手机跑的是新版；若看不到这行=旧缓存
 
 function startAsOfferer() {
   role = 'offerer';
@@ -115,14 +116,18 @@ function initUI() {
   // 屏幕监看
   screenStart.addEventListener('click', () => startScreenShare().catch((e) => log('屏幕共享失败：' + e.message, 'err')));
   screenStop.addEventListener('click', () => stopScreenShare().catch((e) => log('停止共享失败：' + e.message, 'err')));
-  screenFps.addEventListener('change', saveScreenProfile);
+  screenFps.addEventListener('change', () => {
+    const isCustom = screenFps.value === 'custom';
+    screenFpsCustom.classList.toggle('hidden', !isCustom);
+    saveScreenProfile();
+  });
   screenBitrate.addEventListener('change', saveScreenProfile);
+  screenFpsCustom.addEventListener('change', saveScreenProfile);
   screenMode.addEventListener('change', () => {
     saveScreenProfile();
     if (typeof applyScreenAbr === 'function' && screenTransceiver) { abrMode = screenMode.value; applyScreenAbr(); }
   });
-  // 监看端分辨率/缩放变化：防抖上报发送端，自适应下发分辨率
-  let szWatchInfoTimer = null;
+  // 监看端分辨率/缩放变化：防抖上报发送端，自适应下发分辨率（szWatchInfoTimer/szLastWatchSent 已提到文件顶层声明，供 szZoomAt/szTouchEnd 共用）
   window.addEventListener('resize', () => { clearTimeout(szWatchInfoTimer); szWatchInfoTimer = setTimeout(() => { if (typeof sendWatchInfo === 'function') sendWatchInfo(); }, 400); });
   btnPreShare.addEventListener('click', () => pickScreenBeforeConnect().catch((e) => log('预选屏幕失败：' + e.message, 'err')));
 
@@ -180,10 +185,13 @@ function syncScreenFsButtons() {
   screenFsExit.classList.toggle('hidden', !fs);
   screenFsPortrait.classList.toggle('hidden', fs);
   screenFsLandscape.classList.toggle('hidden', fs);
+  if (typeof sendWatchInfo === 'function') sendWatchInfo(); // 全屏切换后按实际显示区域重新自适应分辨率
 }
 
 // ---------- 屏幕监看：缩放 / 平移（Ctrl+滚轮、双指捏合、拖拽） ----------
 let szScale = 1, szTx = 0, szTy = 0;
+let szWatchInfoTimer = null, szLastWatchSent = 0; // 必须在顶层声明：szZoomAt/szTouchEnd 是顶层函数，访问不到 initUI 内部的 let
+let szLastScaleLogT = 0; // 监看端缩放日志节流：每 500ms 最多打一条，避免捏合时刷屏
 let szPanning = null; // 鼠标 / 单指拖拽平移状态
 let szPinch = null;   // 双指捏合状态（记录起始距离与起始 scale）
 let szPinchEndedAt = 0; // 捏合结束时刻：结束后短时间内忽略单指平移，防两指不同时离开导致画面漂移
@@ -193,7 +201,7 @@ function szApply() {
   screenWatchVideo.style.transform = 'translate(' + szTx + 'px,' + szTy + 'px) scale(' + szScale + ')';
   screenFsReset.classList.toggle('hidden', szScale <= 1);
 }
-function szReset() { szScale = 1; szTx = 0; szTy = 0; szApply(); }
+function szReset() { szScale = 1; szTx = 0; szTy = 0; szApply(); if (typeof sendWatchInfo === 'function') sendWatchInfo(); }
 function szClamp(s) { return Math.min(8, Math.max(1, s)); }
 // 平移钳制：让缩放后的视频框始终覆盖舞台（scale=1 时强制 tx=ty=0 居中），
 // 既避免把画面拖飞，也消除“捏合缩小回 scale=1 却残留偏移→卡在左上角”的问题。
@@ -213,7 +221,12 @@ function szZoomAt(clientX, clientY, factor) {
   szTx += (clientX - r.left) * (1 - ns / szScale);
   szTy += (clientY - r.top) * (1 - ns / szScale);
   szScale = ns; szClampPan(); szApply();
-  if (typeof sendWatchInfo === 'function') { clearTimeout(szWatchInfoTimer); szWatchInfoTimer = setTimeout(sendWatchInfo, 400); } // 缩放后提升下发清晰度
+  if (Date.now() - szLastScaleLogT >= 500) { szLastScaleLogT = Date.now(); log('监看端缩放 szScale → ' + szScale.toFixed(2), 'info'); }
+  if (typeof sendWatchInfo === 'function') {
+    const now = Date.now(), minGap = 300;
+    if (now - szLastWatchSent >= minGap) { szLastWatchSent = now; sendWatchInfo(szScale); } // 捏合中：每 300ms 领先上报，边捏边变清晰
+    else { clearTimeout(szWatchInfoTimer); szWatchInfoTimer = setTimeout(() => { szLastWatchSent = Date.now(); sendWatchInfo(szScale); }, minGap - (now - szLastWatchSent)); } //  trailing：停手前补最后一次
+  }
 }
 function szPinchInfo(e) {
   const ax = e.touches[0].clientX, ay = e.touches[0].clientY;
@@ -268,7 +281,11 @@ screenWatchStage.addEventListener('touchmove', (e) => {
   }
 }, { passive: false });
 function szTouchEnd(e) {
-  if (szPinch && e.touches.length < 2) { szPinch = null; szPinchEndedAt = Date.now(); } // 捏合结束→记时刻，触发防抖
+  if (szPinch && e.touches.length < 2) {
+    szPinch = null; szPinchEndedAt = Date.now(); // 捏合结束→记时刻，触发防抖
+    clearTimeout(szWatchInfoTimer); // 松手即上报最终 zoom，避免切后台后 setTimeout 被节流（曾延迟 ~2.5 分钟）
+    if (typeof sendWatchInfo === 'function') sendWatchInfo();
+  }
   if (e.touches.length === 0) szPanning = null;
 }
 screenWatchStage.addEventListener('touchend', szTouchEnd);

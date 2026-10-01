@@ -68,6 +68,7 @@ const backScreen = document.querySelector('[data-back="page-screen"]');
 const screenStart = $('screenStart');
 const screenStop = $('screenStop');
 const screenFps = $('screenFps');
+const screenFpsCustom = $('screenFpsCustom');
 const screenBitrate = $('screenBitrate');
 const screenMode = $('screenMode');
 const screenLocal = $('screenLocal');

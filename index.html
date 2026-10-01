@@ -3,8 +3,9 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>浏览器直传 · 同屏协作</title>
-  <link rel="stylesheet" href="css/base.css?v=48" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <title>浏览器共享协作</title>
+  <link rel="stylesheet" href="css/base.css?v=49" />
   <link rel="stylesheet" href="css/components.css?v=48" />
   <link rel="stylesheet" href="css/pages.css?v=48" />
 </head>
@@ -161,7 +162,9 @@
               <option value="10" selected>10 fps</option>
               <option value="15">15 fps</option>
               <option value="30">30 fps</option>
+              <option value="custom">自定义…</option>
             </select>
+            <input id="screenFpsCustom" class="hidden" type="number" min="1" max="60" step="1" placeholder="自定义 1–60 fps" />
           </label>
           <label class="field">码率(kbps)
             <input id="screenBitrate" type="number" value="1500" min="200" max="8000" step="100" />
@@ -294,9 +297,9 @@
   <script src="js/utils.js?v=48"></script>
   <script src="js/sdp.js?v=48"></script>
   <script src="js/webrtc.js?v=48"></script>
-  <script src="js/features.js?v=48"></script>
+  <script src="js/features.js?v=71"></script>
   <script src="js/nav.js?v=48"></script>
-  <script src="js/ui.js?v=48"></script>
+  <script src="js/ui.js?v=58"></script>
   <script src="js/test.js?v=48"></script>
 </body>
 </html>

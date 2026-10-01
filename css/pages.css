@@ -93,6 +93,7 @@
 .pre-share-btns .btn { width: auto; flex: 0 0 auto; }
 .pre-share-btns #btnPreShare { flex: 7 1 0; }
 .pre-share-btns #btnTest { flex: 3 1 0; }
+#screenFpsCustom {width: 100%; }
 
 @media (max-width: 560px) {
   .role-grid, .hub-grid { grid-template-columns: 1fr; }

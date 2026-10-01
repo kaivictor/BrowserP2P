@@ -38,4 +38,5 @@ function onChannelOpen() {
   goPage('page-hub');
   hubStatus.textContent = '连接已建立，选择一个功能开始协作。';
   refreshConnectedNav();
+  if (szWatchActive && typeof sendWatchInfo === 'function') sendWatchInfo(); // 通道重开：补发最新监看分辨率/缩放，避免上报被断线吞掉
 }
