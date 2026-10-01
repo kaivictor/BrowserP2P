@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>浏览器直传 · 同屏协作</title>
+  <link rel="stylesheet" href="css/base.css?v=48" />
+  <link rel="stylesheet" href="css/components.css?v=48" />
+  <link rel="stylesheet" href="css/pages.css?v=48" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">🔗 浏览器直传</div>
+    <div id="connBadge" class="badge badge-off">未连接</div>
+  </header>
+
+  <main class="app">
+    <!-- ============ 第 1 页：选择身份 ============ -->
+    <section id="page-role" class="page card active">
+      <h2 class="page-title">选择你的身份</h2>
+      <p class="muted">两台设备通过 WebRTC 直连，无需服务器。一方“发起”、另一方“加入”。</p>
+      <div class="role-grid">
+        <button id="btnCreate" class="role-card">
+          <div class="role-ico">🚀</div>
+          <div class="role-name">发起方</div>
+          <div class="role-desc">生成连接码，发给对方</div>
+        </button>
+        <button id="btnJoin" class="role-card">
+          <div class="role-ico">🤝</div>
+          <div class="role-name">加入方</div>
+          <div class="role-desc">填入对方连接码，回传应答</div>
+        </button>
+      </div>
+      <label class="switch-row">
+        <input type="checkbox" id="encToggle" checked />
+        <span>启用端到端加密（AES-GCM，需 HTTPS/localhost）</span>
+      </label>
+      <div class="pre-share mt">
+        <div class="pre-share-btns">
+          <button id="btnPreShare" class="btn btn-ghost btn-sm">🖥️ 先选好要共享的屏幕（连接后自动共享）</button>
+          <button id="btnTest" class="btn btn-ghost btn-sm">🧪 设备测试</button>
+        </div>
+        <p id="preShareStatus" class="muted small"></p>
+      </div>
+      <p class="muted small">提示：首次进入会请求摄像头权限（仅用于扫码并帮助局域网直连，不会持续开启）。</p>
+    </section>
+
+    <!-- ============ 第 2 页：连接码 ============ -->
+    <section id="page-signal" class="page card hidden">
+      <div class="page-head">
+        <button class="back-btn" data-back="page-role">← 返回</button>
+        <h2 class="page-title">建立连接</h2>
+        <button id="btnBackToHub" class="enter-hub-btn btn btn-ghost btn-sm hidden" style="margin-left:auto">返回菜单页</button>
+      </div>
+
+      <!-- 发起方视图 -->
+      <div id="offererView" class="role-view hidden">
+        <h3>① 你的连接码（发给对方）</h3>
+        <textarea id="offerOut" class="code-area" readonly placeholder="正在加载中…"></textarea>
+        <div class="row">
+          <button id="copyOffer" class="btn btn-sm hidden">复制</button>
+          <button id="showOfferQR" class="btn btn-sm btn-ghost hidden">显示二维码</button>
+        </div>
+        <h3 class="mt">② 粘贴对方的应答码</h3>
+        <textarea id="answerIn" class="code-area" placeholder="把对方给你的应答码粘贴到这里"></textarea>
+        <div class="row">
+          <button id="btnSetAnswer" class="btn">完成连接</button>
+          <button id="scanAnswer" class="btn btn-ghost">📷 扫码填入</button>
+        </div>
+      </div>
+
+      <!-- 加入方视图 -->
+      <div id="answererView" class="role-view hidden">
+        <h3>① 粘贴对方的连接码</h3>
+        <textarea id="offerIn" class="code-area" placeholder="把发起方给你的连接码粘贴到这里"></textarea>
+        <div class="row">
+          <button id="btnProcessOffer" class="btn">生成应答码</button>
+          <button id="scanOffer" class="btn btn-ghost">📷 扫码填入</button>
+        </div>
+        <div id="answerOutWrap" class="hidden">
+          <h3 class="mt">② 你的应答码（发回对方）</h3>
+          <textarea id="answerOut" class="code-area" readonly placeholder="正在生成…"></textarea>
+          <div class="row">
+            <button id="copyAnswer" class="btn btn-sm hidden">复制</button>
+            <button id="showAnswerQR" class="btn btn-sm btn-ghost hidden">显示二维码</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 第 3 页：功能中心 ============ -->
+    <section id="page-hub" class="page card hidden">
+      <div class="page-head">
+        <button class="back-btn" data-back="page-signal">← 返回</button>
+        <h2 class="page-title">已连接 · 选择功能</h2>
+      </div>
+      <p id="hubStatus" class="muted">连接已建立，选择一个功能开始协作。</p>
+      <div class="hub-grid">
+        <button id="feat-chat" class="hub-card"><div class="hub-ico">💬</div><div>聊天</div><div class="hub-sub">文字 · 语音 · 文件</div></button>
+        <button id="feat-call" class="hub-card"><div class="hub-ico">📞</div><div>通话</div><div class="hub-sub">实时语音</div></button>
+        <button id="feat-screen" class="hub-card"><div class="hub-ico">🖥️</div><div>屏幕监看</div><div class="hub-sub">共享屏幕</div></button>
+        <button id="feat-clip" class="hub-card"><div class="hub-ico">📋</div><div>剪贴板同步</div><div class="hub-sub">互相粘贴</div></button>
+      </div>
+      <button id="btnDisconnect" class="btn btn-ghost mt">断开连接</button>
+    </section>
+
+    <!-- ============ 第 4 页：聊天 / 文件 ============ -->
+    <section id="page-chat" class="page card hidden">
+      <div class="page-head">
+        <button class="back-btn" data-back="page-hub">← 返回</button>
+        <h2 class="page-title">聊天</h2>
+        <span id="chatCap" class="cap-badge">记录 0 B</span>
+      </div>
+      <div id="chatMessages" class="chat-messages"></div>
+      <div id="chatDrop" class="chat-input">
+        <textarea id="chatInput" class="chat-text-input" placeholder="输入消息，Enter 发送（Shift+Enter 换行）"></textarea>
+        <div class="chat-tools">
+          <button id="chatSend" class="btn btn-sm">发送</button>
+          <button id="chatMic" class="btn btn-sm btn-ghost">🎤 录音</button>
+          <button id="btnFile" class="btn btn-sm btn-ghost">📎 文件</button>
+          <input id="fileInput" type="file" multiple class="hidden" />
+          <button id="btnClearChat" class="btn btn-sm btn-ghost">清空记录</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 第 5 页：通话 ============ -->
+    <section id="page-call" class="page card hidden">
+      <div class="page-head">
+        <button class="back-btn" data-back="page-hub">← 返回</button>
+        <h2 class="page-title">通话</h2>
+      </div>
+      <div class="call-box">
+        <div id="callState" class="call-state">未通话</div>
+        <div class="call-controls">
+          <button id="callStart" class="btn btn-lg">📞 发起通话</button>
+          <button id="callJoin" class="btn btn-lg hidden">✅ 接听</button>
+          <button id="callReject" class="btn btn-lg btn-danger hidden">✖ 拒绝</button>
+          <button id="callMicMute" class="btn btn-lg btn-ghost hidden" disabled>🎙 闭麦</button>
+          <button id="callMute" class="btn btn-lg btn-ghost hidden" disabled>🔇 静音</button>
+          <button id="callEnd" class="btn btn-lg btn-danger hidden" disabled>📴 挂断</button>
+        </div>
+        <audio id="remoteAudio" autoplay></audio>
+        <p class="muted small">通话为实时语音（虚拟电话）。接听后可使用静音 / 挂断。</p>
+      </div>
+    </section>
+
+    <!-- ============ 第 6 页：屏幕监看 ============ -->
+    <section id="page-screen" class="page card hidden">
+      <div class="page-head">
+        <button class="back-btn" data-back="page-hub">← 返回</button>
+        <h2 class="page-title">屏幕监看</h2>
+      </div>
+
+      <div id="screenShareWrap">
+        <p class="muted">在电脑上共享你的标签页 / 窗口 / 整个屏幕给对方观看。</p>
+        <div class="row">
+          <label class="field">帧率
+            <select id="screenFps">
+              <option value="5">5 fps</option>
+              <option value="10" selected>10 fps</option>
+              <option value="15">15 fps</option>
+              <option value="30">30 fps</option>
+            </select>
+          </label>
+          <label class="field">码率(kbps)
+            <input id="screenBitrate" type="number" value="1500" min="200" max="8000" step="100" />
+          </label>
+          <label class="field">模式
+            <select id="screenMode">
+              <option value="smooth" selected>流畅优先</option>
+              <option value="clear">清晰度优先</option>
+            </select>
+          </label>
+        </div>
+        <div class="row">
+          <button id="screenStart" class="btn">▶ 开始共享</button>
+          <button id="screenStop" class="btn btn-danger hidden">⏹ 停止共享</button>
+        </div>
+        <p id="screenSendStats" class="muted small"></p>
+        <video id="screenLocal" class="screen-video hidden" muted autoplay playsinline></video>
+      </div>
+
+      <div id="screenWatchWrap" class="hidden">
+        <p id="screenStatus" class="muted">等待对方开始共享…</p>
+        <p id="screenStats" class="muted small"></p>
+        <div id="screenWatchStage" class="screen-stage">
+          <video id="screenWatchVideo" class="screen-video" autoplay playsinline muted></video>
+          <div class="screen-fs-bar">
+            <button id="screenFsPortrait" class="btn btn-sm">▯ 竖屏全屏</button>
+            <button id="screenFsLandscape" class="btn btn-sm">▭ 横屏全屏</button>
+            <button id="screenFsReset" class="btn btn-sm hidden">复位</button>
+            <button id="screenFsExit" class="btn btn-sm btn-ghost hidden">✕ 退出全屏</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 第 7 页：剪贴板同步 ============ -->
+    <section id="page-clip" class="page card hidden">
+      <div class="page-head">
+        <button class="back-btn" data-back="page-hub">← 返回</button>
+        <h2 class="page-title">剪贴板同步</h2>
+      </div>
+      <label class="field-block">本机内容
+        <textarea id="clipLocal" class="code-area" placeholder="粘贴或输入要同步给对方的内容"></textarea>
+      </label>
+      <label class="switch-row">
+        <input type="checkbox" id="clipAuto">
+        <span>自动同步：本机复制内容变化时自动发给对方</span>
+      </label>
+      <div class="row">
+        <button id="clipSend" class="btn">⇨ 手动同步给对方</button>
+      </div>
+      <label class="field-block mt">对方内容
+        <textarea id="clipRemote" class="code-area" readonly placeholder="对方同步过来的内容会显示在这里"></textarea>
+      </label>
+      <div class="row">
+        <button id="clipCopy" class="btn btn-ghost">复制对方内容</button>
+      </div>
+    </section>
+
+    <!-- ============ 第 8 页：设备测试 ============ -->
+    <section id="page-test" class="page card hidden">
+      <div class="page-head">
+        <button class="back-btn" data-back="page-role">← 返回</button>
+        <h2 class="page-title">设备测试</h2>
+      </div>
+
+      <div class="test-block">
+        <h3>📷 摄像头测试</h3>
+        <video id="testCam" autoplay playsinline muted
+          style="width:100%;max-height:260px;background:#000;border-radius:8px;object-fit:contain"></video>
+        <div class="row mt">
+          <button id="testCamBtn" class="btn btn-lg">📷 打开摄像头</button>
+        </div>
+        <p id="testCamStatus" class="muted small">点击打开摄像头，确认画面正常。</p>
+      </div>
+
+      <div class="test-block">
+        <h3>🎤 麦克风测试</h3>
+        <div class="meter" style="height:14px;background:#eee;border-radius:7px;overflow:hidden">
+          <div id="testMeter" style="height:100%;width:0%;background:linear-gradient(90deg,#3fb950,#f0a020,#e5484d);transition:width .05s"></div>
+        </div>
+        <div id="testMicStatus" class="muted small">未录音。点“开始录音”后对着设备说话，看电平条是否跳动（这是判断麦克风是否真的在采集的关键）。</div>
+        <div class="row mt">
+          <button id="testMicBtn" class="btn btn-lg">🎤 开始录音</button>
+          <audio id="testAudio" class="hidden"></audio>
+        </div>
+        <p class="muted small">流程：开始录音 → 结束 → 播放 →（再点）录音。若播放无声但电平条在跳，说明麦克风有数据、问题在编码/播放链路。</p>
+      </div>
+    </section>
+
+    <!-- 全局日志 -->
+    <section class="card log-card">
+      <div class="log-head">日志 <button id="logToggle" class="btn btn-sm btn-ghost">收起</button></div>
+      <div id="log" class="log"></div>
+    </section>
+  </main>
+
+  <!-- 二维码全屏 -->
+  <div id="qrFullscreen" class="modal hidden">
+    <div class="modal-content qr-full">
+      <h3>二维码（点击任意处关闭）</h3>
+      <div id="qrFullscreenInner" class="qr-box"></div>
+    </div>
+  </div>
+
+  <!-- 扫码 -->
+  <div id="scanModal" class="modal hidden">
+    <div class="modal-content">
+      <h3>扫码</h3>
+      <video id="scanVideo" playsinline></video>
+      <canvas id="scanCanvas" class="hidden"></canvas>
+      <p id="scanStatus" class="scan-status"></p>
+      <button id="scanClose" class="btn btn-ghost mt">关闭</button>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <!-- iOS 隐藏坑：getUserMedia 轨道只喂给 WebRTC/Web Audio 不会启动采集。须挂到“静音且正在播放”的
+       <video> 上强制激活采集管线。此元素绝不能放在被 display:none 的页面/分区内，否则 iOS 拒绝播放、
+       麦克风不激活（表现为录音 0 帧/无声）。故放在 <body> 顶层，始终处于视口内（1px 透明、不可见）。 -->
+  <video id="audioPrimer" autoplay playsinline muted style="position:absolute;top:0;left:0;width:1px;height:1px;opacity:0;pointer-events:none;z-index:-1"></video>
+
+  <!-- 第三方库（提供全局 qrcode / jsQR） -->
+  <script src="js/vendor/qrcode.js?v=48"></script>
+  <script src="js/vendor/jsQR.js?v=48"></script>
+  <!-- 业务脚本（经典脚本，按依赖顺序加载，共享全局作用域） -->
+  <script src="js/dom.js?v=48"></script>
+  <script src="js/config.js?v=48"></script>
+  <script src="js/lzh.js?v=48"></script>
+  <script src="js/utils.js?v=48"></script>
+  <script src="js/sdp.js?v=48"></script>
+  <script src="js/webrtc.js?v=48"></script>
+  <script src="js/features.js?v=48"></script>
+  <script src="js/nav.js?v=48"></script>
+  <script src="js/ui.js?v=48"></script>
+  <script src="js/test.js?v=48"></script>
+</body>
+</html>

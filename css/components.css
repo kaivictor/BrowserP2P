@@ -1,0 +1,102 @@
+/* ---------- 二维码 ---------- */
+.qr-box {
+  flex: 0 0 auto; background: #fff; border-radius: 10px; padding: 8px;
+  align-self: flex-start; cursor: zoom-in;
+}
+.qr-canvas svg { display: block; width: 180px; height: 180px; }
+.qr-full .qr-box { cursor: default; background: #fff; padding: 12px; }
+/* 二维码全屏：用 <img>(GIF) 而非内联 SVG，移动端尺寸行为可靠。
+   同时设定宽高（不要 height:auto），避免移动端塌缩。*/
+/* 单张二维码（直接子元素）：同时设宽高避免移动端塌缩 */
+#qrFullscreenInner > img { display: block; width: min(86vw, 86vh); height: min(86vw, 86vh); }
+/* 多张分块二维码：纵向排列，每张密度低、易扫 */
+.qr-multi-tip { font-size: 13px; color: var(--text-dim); margin: 0 0 14px; line-height: 1.6; text-align: left; }
+.qr-multi-item { margin: 0 auto 18px; text-align: center; }
+.qr-multi-cap { font-size: 13px; font-weight: 600; margin-bottom: 8px; }
+.qr-multi-box { display: inline-block; background: #fff; padding: 8px; border-radius: 10px; }
+.qr-multi-box img { display: block; width: min(68vw, 280px); height: auto; }
+/* 扫码进度 */
+.scan-status { margin-top: 12px; font-size: 13px; color: var(--accent-2); min-height: 18px; text-align: center; }
+
+/* ---------- 模态框 ---------- */
+.modal {
+  position: fixed; top: 0; right: 0; bottom: 0; left: 0; background: rgba(0,0,0,.7);
+  display: flex; align-items: center; justify-content: center; z-index: 50; padding: 16px;
+}
+.modal-content {
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 20px; max-width: 420px; width: 100%; text-align: center;
+}
+/* 二维码全屏浮层：覆盖 modal-content 的 420px 限制，按内容自适应，可滚动 */
+.modal-content.qr-full { width: auto; max-width: 92vw; max-height: 92vh; overflow-y: auto; }
+.modal-content h3 { margin: 0 0 6px; }
+#scanVideo { width: 100%; border-radius: 10px; background: #000; max-height: 60vh; }
+
+/* ---------- 传输列表 ---------- */
+.transfer-list { display: flex; flex-direction: column; gap: 12px; margin-top: 14px; }
+.t-item {
+  background: var(--bg-elev); border: 1px solid var(--border);
+  border-radius: 12px; padding: 12px 14px;
+}
+.t-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.t-name { font-size: 14px; font-weight: 600; word-break: break-all; }
+.t-size { font-size: 12px; color: var(--text-dim); white-space: nowrap; }
+.t-bar { height: 8px; background: #e2e7f1; border-radius: 999px; overflow: hidden; margin-top: 10px; }
+.t-fill { height: 100%; width: 0%; background: linear-gradient(90deg, var(--accent), var(--accent-2)); transition: width .2s; }
+.t-meta { font-size: 12px; color: var(--text-dim); margin-top: 8px; display: flex; justify-content: space-between; gap: 8px; }
+.t-hash { font-family: ui-monospace, monospace; font-size: 10px; word-break: break-all; color: #6f7aa3; }
+.t-status-ok { color: var(--accent-2); }
+.t-status-err { color: var(--danger); }
+.history-list { margin-top: 12px; }
+.history-list .t-item { opacity: .85; }
+
+/* ---------- 日志 ---------- */
+.log-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.log {
+  background: #eef1f8; border: 1px solid var(--border); border-radius: 10px;
+  padding: 12px; max-height: 240px; overflow: auto; font-size: 12px;
+  font-family: ui-monospace, monospace; color: #3b4258; line-height: 1.6; margin: 0;
+}
+.log.collapsed { display: none; }
+.log .lv-info { color: #6b7488; }
+.log .lv-ok { color: var(--accent-2); }
+.log .lv-warn { color: #b8891f; }
+.log .lv-err { color: var(--danger); }
+
+/* ---------- 聊天气泡 ---------- */
+.chat-messages {
+  background: #eef1f8; border: 1px solid var(--border); border-radius: 12px;
+  padding: 14px; height: 320px; max-height: 46vh; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 12px;
+}
+.chat-msg { display: flex; flex-direction: column; max-width: 80%; }
+.chat-msg.me { align-self: flex-end; align-items: flex-end; }
+.chat-msg.them { align-self: flex-start; align-items: flex-start; }
+.chat-body {
+  padding: 9px 12px; border-radius: 14px; font-size: 14px; line-height: 1.5;
+  word-break: break-word; background: var(--bg-elev); border: 1px solid var(--border);
+}
+.chat-msg.me .chat-body { background: linear-gradient(135deg, var(--accent), #4a7bf0); border-color: transparent; color: #fff; }
+.chat-text { white-space: pre-wrap; }
+.chat-body audio { display: block; width: 220px; max-width: 60vw; height: 36px; margin-top: 2px; }
+.chat-bar { height: 6px; background: #e2e7f1; border-radius: 999px; overflow: hidden; margin-top: 8px; width: 200px; max-width: 55vw; }
+.chat-fill { height: 100%; width: 0%; background: linear-gradient(90deg, var(--accent), var(--accent-2)); transition: width .2s; }
+.chat-state { font-size: 11px; color: var(--text-dim); margin-top: 5px; }
+.chat-meta { font-size: 10px; color: #6f7aa3; margin-top: 4px; }
+
+/* ---------- 通话 ---------- */
+.call-box { text-align: center; }
+.call-state { font-size: 15px; color: var(--text-dim); margin: 8px 0 18px; }
+.call-state.live { color: var(--accent-2); }
+.call-controls { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+#remoteAudio { display: block; width: 100%; margin-top: 16px; height: 40px; }
+
+/* ---------- 轻量 Toast ---------- */
+.toast {
+  position: fixed; left: 50%; bottom: 36px; transform: translateX(-50%) translateY(12px);
+  background: rgba(255, 255, 255, 0.97); color: #1b2030; padding: 11px 22px; border-radius: 12px; border: 1px solid var(--border);
+  font-size: 14px; font-weight: 600; z-index: 9999; opacity: 0;
+  transition: opacity .25s ease, transform .25s ease; pointer-events: none;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, .12); border: 1px solid rgba(0, 0, 0, .08);
+}
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }

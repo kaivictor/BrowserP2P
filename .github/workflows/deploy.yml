@@ -1,0 +1,66 @@
+name: Deploy static site to GitHub Pages
+
+on:
+  push:
+    branches: [ master ]   # 若默认分支是 main，请改成 main
+  workflow_dispatch:        # 允许在 Actions 页面手动触发
+
+# 允许 GITHUB_TOKEN 部署到 Pages
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 同一时间只允许一个部署，新的会取消进行中的旧部署
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  # 构建/打包阶段：压缩 JS/CSS 后上传为 Pages 产物
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Minify JS & CSS (保留顶层全局名，避免跨脚本引用断裂)
+        run: |
+          npm i -g esbuild
+          # JS：每个文件独立压缩；非打包模式默认不重命名顶层声明，跨文件全局引用安全
+          for f in js/*.js js/vendor/*.js; do
+            esbuild "$f" --minify --target=es2020 --outfile="$f.tmp" && mv "$f.tmp" "$f"
+          done
+          # CSS：直接压缩
+          for f in css/*.css; do
+            esbuild "$f" --minify --outfile="$f.tmp" && mv "$f.tmp" "$f"
+          done
+
+      - name: Cache-bust index.html (?v= 换成本次运行 ID，避免用到压缩前的旧缓存)
+        run: sed -i -E 's/\?v=[0-9]+/?v=${{ github.run_id }}/g' index.html
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          # 站点根目录（含压缩后的 index.html / css / js）
+          path: .
+
+  # 部署阶段
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

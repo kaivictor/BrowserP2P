@@ -1,0 +1,99 @@
+/* ---------- 页面系统 ---------- */
+.page { animation: pageIn .22s ease; }
+@keyframes pageIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.page-head { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+.page-title { margin: 0 !important; }
+.back-btn {
+  background: transparent; border: 1px solid var(--border); color: var(--text-dim);
+  border-radius: 9px; padding: 6px 12px; font-size: 13px; cursor: pointer; flex: 0 0 auto;
+}
+.back-btn:hover { border-color: var(--accent); color: var(--text); }
+.cap-badge {
+  margin-left: auto; font-size: 12px; color: var(--text-dim);
+  background: var(--bg-elev); border: 1px solid var(--border); border-radius: 999px; padding: 4px 10px;
+}
+
+/* ---------- 第 1 页：角色选择 ---------- */
+.role-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 8px; }
+.role-card {
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  background: var(--bg-elev); border: 1px solid var(--border); color: var(--text);
+  border-radius: var(--radius); padding: 22px 12px; cursor: pointer;
+  transition: transform .12s, border-color .12s;
+}
+.role-card:hover { transform: translateY(-2px); border-color: var(--accent); }
+.role-ico { font-size: 32px; }
+.role-name { font-size: 16px; font-weight: 600; }
+.role-desc { font-size: 12px; color: var(--text-dim); }
+
+/* ---------- 第 3 页：功能中心 ---------- */
+.hub-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 10px; }
+.hub-card {
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  background: var(--bg-elev); border: 1px solid var(--border); color: var(--text);
+  border-radius: var(--radius); padding: 22px 12px; cursor: pointer; text-align: center;
+  transition: transform .12s, border-color .12s;
+}
+.hub-card:hover { transform: translateY(-2px); border-color: var(--accent); }
+.hub-ico { font-size: 30px; }
+.hub-card > div:nth-child(2) { font-size: 16px; font-weight: 600; }
+.hub-sub { font-size: 12px; color: var(--text-dim); }
+
+/* ---------- 第 4 页：聊天输入 ---------- */
+.chat-input {
+  margin-top: 12px; background: #eef1f8; border: 1px solid var(--border);
+  border-radius: 12px; padding: 10px; display: flex; flex-direction: column; gap: 10px;
+}
+.chat-text-input {
+  width: 100%; min-height: 46px; max-height: 140px; resize: vertical;
+  background: transparent; color: var(--text); border: none; outline: none;
+  font-size: 14px; font-family: inherit; line-height: 1.5;
+}
+.chat-tools { display: flex; gap: 8px; flex-wrap: wrap; }
+.chat-input.drag { border-color: var(--accent); background: rgba(91,140,255,.08); }
+
+/* ---------- 第 6 页：屏幕 ---------- */
+.screen-video {
+  width: 100%; border-radius: 12px; background: #000; margin-top: 12px;
+  max-height: 56vh; border: 1px solid var(--border); touch-action: none;
+}
+/* 屏幕共享的本地预览保持原始方向（不要镜像，避免文字/界面左右颠倒） */
+
+/* 监看舞台：承载视频与全屏按钮 */
+.screen-stage { position: relative; margin-top: 12px; overflow: hidden; touch-action: none; }
+.screen-fs-bar {
+  display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; justify-content: center;
+}
+/* 全屏态：视频铺满屏幕，按钮浮于顶部 */
+.screen-stage:fullscreen,
+.screen-stage:-webkit-full-screen {
+  display: flex; align-items: center; justify-content: center;
+  width: 100vw; height: 100vh; background: #000; margin: 0; overflow: hidden;
+}
+.screen-stage:fullscreen .screen-video,
+.screen-stage:-webkit-full-screen .screen-video {
+  width: 100%; height: 100%; max-height: none; margin: 0;
+  border: 0; border-radius: 0; object-fit: contain; will-change: transform;
+}
+.screen-stage:fullscreen .screen-fs-bar,
+.screen-stage:-webkit-full-screen .screen-fs-bar {
+  position: fixed; top: 12px; left: 50%; transform: translateX(-50%);
+  margin: 0; z-index: 10;
+}
+
+/* ---------- 第 2 页：信令 ---------- */
+.role-view .row { margin-top: 12px; }
+
+/* 开关行（剪贴板自动同步等） */
+.switch-row { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 13px; color: var(--text-dim); cursor: pointer; }
+.switch-row input { width: 16px; height: 16px; accent-color: var(--accent); flex: none; }
+.pre-share { margin-top: 14px; border-top: 1px dashed var(--border); padding-top: 12px; }
+.pre-share .btn { width: 100%; justify-content: center; }
+.pre-share-btns { display: flex; gap: 10px; }
+.pre-share-btns .btn { width: auto; flex: 0 0 auto; }
+.pre-share-btns #btnPreShare { flex: 7 1 0; }
+.pre-share-btns #btnTest { flex: 3 1 0; }
+
+@media (max-width: 560px) {
+  .role-grid, .hub-grid { grid-template-columns: 1fr; }
+}
