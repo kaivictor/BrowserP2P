@@ -172,8 +172,9 @@ function setupDataChannel(channel) {
     setBadge('已连接', 'on');
     channel.send(JSON.stringify({ type: 'fp', value: sessionFingerprint }));
     if (typeof onChannelOpen === 'function') onChannelOpen();
+    if (typeof setWakeConnected === 'function') setWakeConnected(true); // 连接建立即保持屏幕常亮，避免息屏断连
   };
-  channel.onclose = () => { setBadge('已断开', 'off'); logT('WebRTC', 'DataChannel 已关闭。', 'warn'); if (typeof refreshConnectedNav === 'function') refreshConnectedNav(); };
+  channel.onclose = () => { setBadge('已断开', 'off'); logT('WebRTC', 'DataChannel 已关闭。', 'warn'); if (typeof refreshConnectedNav === 'function') refreshConnectedNav(); if (typeof setWakeConnected === 'function') setWakeConnected(false); };
   channel.onmessage = handleMessage;
 }
 

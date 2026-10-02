@@ -542,24 +542,34 @@ async function onSdpAnswer(msg) {
   try { await pc.setRemoteDescription({ type: 'answer', sdp: msg.sdp }); }
   catch (e) { logT('屏幕共享', '屏幕协商应答失败：' + e.message, 'err'); }
 }
-// ---------- 监看端防休眠（Screen Wake Lock API） ----------
-// 监看期间保持屏幕常亮，避免监控中被系统息屏。浏览器不支持时静默跳过（如 Firefox、非 HTTPS 环境）。
+// ---------- 防休眠（Screen Wake Lock API） ----------
+// 满足任一“保持常亮原因”即申请屏幕常亮，避免系统息屏导致连接/监看被中断：
+//   connect —— DataChannel 已建立（连接期间全程保持，防止息屏断连）
+//   monitor —— 正在监看对方屏幕
+// 任一原因成立即持有；全部取消才释放。浏览器不支持时静默跳过（如 Firefox、非 HTTPS 环境）。
 let screenWakeLock = null;
+let wakeReasons = { connect: false, monitor: false };
 async function requestScreenWakeLock() {
   if (!('wakeLock' in navigator)) return;
+  if (screenWakeLock) return; // 已持有，无需重复申请（任一原因覆盖即可）
   try {
     screenWakeLock = await navigator.wakeLock.request('screen');
     screenWakeLock.addEventListener('release', () => { screenWakeLock = null; }, { once: true });
-    logT('屏幕共享', '已开启防休眠（屏幕常亮）。', 'info');
-  } catch (e) { screenWakeLock = null; logT('屏幕共享', '防休眠请求失败：' + e.message, 'warn'); }
+    logT('防休眠', '已开启屏幕常亮（防休眠）。', 'info');
+  } catch (e) { screenWakeLock = null; logT('防休眠', '防休眠请求失败：' + e.message, 'warn'); }
 }
 function releaseScreenWakeLock() {
   if (screenWakeLock) { try { screenWakeLock.release(); } catch (e) {} screenWakeLock = null; }
 }
+// 依据当前激活原因 + 页面可见性，决定申请或释放（页面隐藏时浏览器会自动释放，故无需主动持有）
+function refreshWakeLock() {
+  const want = (wakeReasons.connect || wakeReasons.monitor) && document.visibilityState === 'visible';
+  if (want) requestScreenWakeLock(); else releaseScreenWakeLock();
+}
+// 由 webrtc.js 在 DataChannel 开/关时调用：连上即保持常亮，断开即释放
+function setWakeConnected(on) { wakeReasons.connect = !!on; refreshWakeLock(); }
 // 页面切回前台时重新申请：wake lock 在页面隐藏时会被浏览器自动释放
-document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' && !screenWatchWrap.classList.contains('hidden')) requestScreenWakeLock();
-});
+document.addEventListener('visibilitychange', refreshWakeLock);
 function onScreenStart() {
   goPage('page-screen');
   screenShareWrap.classList.add('hidden');
@@ -570,7 +580,7 @@ function onScreenStart() {
   szWatchActive = true; // 标记监看中，通道重开后自动补发 watch-info
   szStartQualityMonitor(); // 启动监看画质检测（花屏自愈）
   sendWatchInfo(); // 上报本机屏幕分辨率/缩放，发送端据此自适应下发分辨率
-  requestScreenWakeLock(); // 监看期间保持屏幕常亮
+  wakeReasons.monitor = true; refreshWakeLock(); // 监看期间保持屏幕常亮
   // 黑屏诊断：5s 后若仍无画面，给出提示（多为隐藏态 play 被忽略或协商未就绪）
   setTimeout(() => {
     if (screenWatchVideo.srcObject && screenWatchVideo.readyState < 2 && !screenWatchWrap.classList.contains('hidden')) {
@@ -629,7 +639,7 @@ function onScreenStop() {
   if (typeof exitScreenFs === 'function') exitScreenFs();
   if (typeof szReset === 'function') szReset();
   try { screenWatchVideo.pause(); } catch (e) {} // 停止解码，节省资源
-  releaseScreenWakeLock(); // 结束监看，解除防休眠
+  wakeReasons.monitor = false; refreshWakeLock(); // 结束监看，解除防休眠（若仍在连接中则继续常亮）
   screenStatus.textContent = '对方已停止共享。'; if (screenStats) screenStats.textContent = '';
   logT('监看', '对方停止了屏幕共享。', 'info');
 }
