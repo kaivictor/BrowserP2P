@@ -252,9 +252,9 @@ let szLastWatchCrop = null; // 最近一次监看端上报的裁切矩形（归�
 let szCropCanvas = null, szCropCtx = null, szCropRaf = 0, szCropOn = false, szCropStream = null, szCropRect = null;
 let szLastCropReqKey = ''; // 区域日志节流：仅区域变化时打四角坐标，避免平移中刷屏
 function szIsCropEnabled() { return (typeof szCropEnabled !== 'undefined') ? !!szCropEnabled : false; }
-// 通知监看端“我正在/已停止裁切”，让其切换显示（避免二次放大）
-function szNotifyCrop(on) {
-  try { if (dc && dc.readyState === 'open') dc.send(JSON.stringify({ type: 'screen-crop', on: !!on })); } catch (e) {}
+// 通知监看端“我正在/已停止裁切”（on）以及“是否已启用裁切功能”（enabled，供监看端决定是否上报裁切矩形）
+function szNotifyCrop(on, enabled) {
+  try { if (dc && dc.readyState === 'open') dc.send(JSON.stringify({ type: 'screen-crop', on: !!on, enabled: (enabled === undefined ? szIsCropEnabled() : !!enabled) })); } catch (e) {}
 }
 // 用 Canvas 仅裁切监看端放大的局部并替换发送轨道（更清晰、省带宽）；裁切矩形变化时逐帧重算
 function szEnableCrop(rect) {
@@ -310,7 +310,12 @@ function szEvaluateCrop() {
   else szDisableCrop();
 }
 // 接收侧（监看端）收到发送端“正在/已停止裁切”通知
-function onScreenCrop(msg) { if (typeof szSetCropRx === 'function') szSetCropRx(!!(msg && msg.on)); }
+function onScreenCrop(msg) {
+  if (typeof szSetCropRx === 'function') szSetCropRx(!!(msg && msg.on));
+  szCropRxReady = !!(msg && msg.enabled); // 发送端已启用裁切：监看端才向其上报裁切矩形
+  // 发送端刚启用裁切：立即补报当前放大局部，尽快开始裁切（无需等用户再操作）
+  if (szCropRxReady && typeof sendWatchInfo === 'function') sendWatchInfo();
+}
 // 由统一衰减系数 D 推算当前码率/帧率/分辨率缩放：applied = 上限 × D
 function screenAbrCurrent() {
   const D = abrDegrade;
@@ -594,6 +599,7 @@ function onScreenStart() {
 // 监看端上报：本机屏幕分辨率 + 当前缩放。发送端据此降分辨率下发（省带宽）并按缩放提升清晰度。
 function sendWatchInfo(zoom) {
   const z = (typeof zoom === 'number' && zoom > 0) ? zoom : ((typeof szScale === 'number' && szScale > 0) ? szScale : 1);
+  const zoomChanged = (szLastWatchZoom !== z); // 仅缩放真正变化才打“zoom=”，平移/复位只动区域，不打 zoom
   szLastWatchZoom = z; // 缓存最新值，断线/未就绪时也保留，重连或重试时补发
   if (!szWatchActive) return; // 未进入监看会话（启动期/未连接/已退出）不上报，也不打 warn、不起重试定时器；进入会话后首报由 onScreenStart 触发
   try {
@@ -601,10 +607,11 @@ function sendWatchInfo(zoom) {
     // 上报本机显示器分辨率作为“可显示上限”：无论面板大小/全屏/横屏，都按显示器实际尺寸，
     // 不会因面板小就降分辨率；横屏方向锁后 window.screen 宽高互换由接收侧用 max 适配。
     const dpr = window.devicePixelRatio || 1; // 用物理像素，规避系统显示缩放（如 150% 缩放下 CSS 像素仅 1280，乘 DPR 才回到真实 1080p）
-    logT('监看', '上报监看端 zoom=' + z.toFixed(2), 'info');
-    // crop：监看端放大查看局部时，算出全屏源归一化矩形一并上报；发送端开启“Canvas 裁切”才会用，否则按全屏传。始终上报（不依赖本端复选框，裁切由发送端决定）。
-    const crop = (typeof szGetCropRect === 'function') ? szGetCropRect() : null;
-    if (!crop && z > 1) {
+    if (zoomChanged) logT('监看', '上报监看端 zoom=' + z.toFixed(2), 'info');
+    else logT('监看', '上报监看端 区域更新（平移/复位，zoom 未变）', 'info');
+    // crop：监看端放大查看局部时，算出全屏源归一化矩形；仅当发送端已启用“Canvas 裁切”（szCropRxReady）才上报，否则按全屏传（对方未启用，发也没用）。
+    const crop = (szCropRxReady && typeof szGetCropRect === 'function') ? szGetCropRect() : null;
+    if (szCropRxReady && !crop && z > 1) {
       logT('监看', '监看端裁切矩形为 null：szScale=' + z.toFixed(2) +
         ' videoW=' + (screenWatchVideo ? screenWatchVideo.videoWidth : '?') +
         ' videoH=' + (screenWatchVideo ? screenWatchVideo.videoHeight : '?') +

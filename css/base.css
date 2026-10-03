@@ -34,6 +34,10 @@ body {
 .badge-off { background: #f7e3e6; color: var(--danger); border-color: #f0c4ca; }
 .badge-pending { background: #fbf2d6; color: #b8891f; border-color: #ecd9a0; }
 .badge-on { background: #e1f6ec; color: var(--accent-2); border-color: #b7e6cd; }
+.badge-warn { background: #fdecdd; color: #c4621a; border-color: #f6cda8; }
+#connBadge { cursor: pointer; user-select: none; }
+#connBadge:hover { filter: brightness(.97); }
+#connBadge::after { content: ' ↻'; opacity: .6; font-size: 12px; }
 
 /* 主容器 */
 .app { max-width: 820px; margin: 0 auto; padding: 8px 16px 60px; }

@@ -69,6 +69,7 @@ function initUI() {
   btnCreate.addEventListener('click', startAsOfferer);
   btnJoin.addEventListener('click', startAsAnswerer);
   btnDisconnect.addEventListener('click', disconnect);
+  connBadge.addEventListener('click', checkConnectionNow); // 点击右上角连接状态：立即互发心跳探测
 
   // 功能中心：进入对应功能页
   featChat.addEventListener('click', () => goPage('page-chat'));
@@ -193,6 +194,7 @@ let szScale = 1, szTx = 0, szTy = 0;
 // Canvas 裁切（发送端勾选控制；监看端仅做显示）
 let szCropEnabled = false;  // 复选框：发送端是否启用 Canvas 裁切传输（仅传监看端放大的局部）
 let szCropRxActive = false; // 接收侧：发送端是否正在裁切传输（收到 screen-crop 置位；置位后本地按 fit 显示，避免二次放大）
+let szCropRxReady = false;  // 接收侧：发送端是否已启用 Canvas 裁切（收到 screen-crop.enabled 置位；仅此时才向其上报裁切矩形）
 let szSrcW = 0, szSrcH = 0; // 全屏源分辨率缓存：把缩放/平移换算成裁切矩形用（裁切态不能取视频实际宽高，因为那已是局部）
 const szCropChk = document.getElementById('szCropChk');
 const szCropRow = document.getElementById('szCropRow');
@@ -240,7 +242,7 @@ function szGetCropRect() {
 }
 // 接收侧：发送端告知“我正在/已停止裁切”。置位后本地按 fit 显示，避免二次放大。
 function szSetCropRx(on) { szCropRxActive = !!on; szApply(); }
-function szReset() { szScale = 1; szTx = 0; szTy = 0; szApply(); if (typeof sendWatchInfo === 'function') sendWatchInfo(); }
+function szReset() { szScale = 1; szTx = 0; szTy = 0; szApply(); if (szCropRxReady && typeof sendWatchInfo === 'function') sendWatchInfo(); }
 function szClamp(s) { return Math.min(8, Math.max(1, s)); }
 // 平移钳制：让缩放后的视频框始终覆盖舞台（scale=1 时强制 tx=ty=0 居中），
 // 既避免把画面拖飞，也消除“捏合缩小回 scale=1 却残留偏移→卡在左上角”的问题。
@@ -270,6 +272,7 @@ function szZoomAt(clientX, clientY, factor) {
 }
 // 平移中按节流重新上报：仅平移（szScale 不变）也会改变放大局部，必须重新发送 crop，发送端才能更新裁切区域
 function szReportPanThrottled() {
+  if (!szCropRxReady) return; // 仅平移不改变发送端任何状态（除非启用 Canvas 裁切需更新局部）；未启用则不报、不打日志
   if (typeof sendWatchInfo !== 'function') return;
   const now = Date.now(), minGap = 200;
   if (now - szLastWatchSent >= minGap) { szLastWatchSent = now; sendWatchInfo(); }
@@ -301,7 +304,7 @@ window.addEventListener('mousemove', (e) => {
   szClampPan(); szApply();
   szReportPanThrottled(); // 平移中节流上报新局部，发送端实时更新裁切
 });
-window.addEventListener('mouseup', () => { if (szPanning) { szPanning = null; if (typeof sendWatchInfo === 'function') sendWatchInfo(); } });
+window.addEventListener('mouseup', () => { if (szPanning) { szPanning = null; if (szCropRxReady && typeof sendWatchInfo === 'function') sendWatchInfo(); } });
 // 触摸：双指捏合缩放（捏合中点即平移焦点）+ 单指拖拽平移
 screenWatchStage.addEventListener('touchstart', (e) => {
   if (e.target.closest('button')) return;

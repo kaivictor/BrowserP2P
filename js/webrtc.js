@@ -173,13 +173,70 @@ function setupDataChannel(channel) {
     channel.send(JSON.stringify({ type: 'fp', value: sessionFingerprint }));
     if (typeof onChannelOpen === 'function') onChannelOpen();
     if (typeof setWakeConnected === 'function') setWakeConnected(true); // 连接建立即保持屏幕常亮，避免息屏断连
+    startHeartbeat(); // 连接建立即启动心跳探活
   };
-  channel.onclose = () => { setBadge('已断开', 'off'); logT('WebRTC', 'DataChannel 已关闭。', 'warn'); if (typeof refreshConnectedNav === 'function') refreshConnectedNav(); if (typeof setWakeConnected === 'function') setWakeConnected(false); };
+  channel.onclose = () => { setBadge('已断开', 'off'); logT('WebRTC', 'DataChannel 已关闭。', 'warn'); if (typeof refreshConnectedNav === 'function') refreshConnectedNav(); if (typeof setWakeConnected === 'function') setWakeConnected(false); stopHeartbeat(); };
   channel.onmessage = handleMessage;
+}
+
+// ---------- 心跳保活：互发 ping/pong 探测连接真实存活 ----------
+// DataChannel 的 readyState 在“半开”时仍可能保持 open（如 NAT 映射过期、对端假死），
+// 仅依赖 onclose 无法及时发现。周期互发 ping/pong，超时无任何对端消息则标记“可能已断连”。
+const HEARTBEAT_INTERVAL = 5000;  // 周期发送 ping 的间隔
+const HEARTBEAT_STALE = 12000;    // 超过此时间无对端任何消息（pong 或任意业务消息），判定可能断连
+let heartbeatTimer = null;
+let lastPeerActive = 0;           // 最近收到对端任意消息的时间戳
+let pendingCheck = null;          // 手动“点击刷新”探测：{ timer }
+
+// 任一入站消息都证明对端存活：刷新活跃时间；若此前因超时被判异常则自动恢复“已连接”
+function markPeerActive() {
+  lastPeerActive = Date.now();
+  if (connBadge && connBadge.classList.contains('badge-warn')) setBadge('已连接', 'on');
+}
+function startHeartbeat() {
+  stopHeartbeat();
+  lastPeerActive = Date.now();
+  heartbeatTimer = setInterval(beatTick, HEARTBEAT_INTERVAL);
+}
+function stopHeartbeat() {
+  if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
+  if (pendingCheck) { clearTimeout(pendingCheck.timer); pendingCheck = null; }
+}
+function beatTick() {
+  if (!dc || dc.readyState !== 'open') return;
+  try { dc.send(JSON.stringify({ type: 'ping', t: Date.now() })); } catch (e) {}
+  // 手动探测进行中不要覆盖“检测中…”显示；否则超时即标记可能断连
+  if (!pendingCheck && Date.now() - lastPeerActive > HEARTBEAT_STALE) setBadge('可能已断连', 'warn');
+}
+function onPing(msg) {
+  if (dc && dc.readyState === 'open') { try { dc.send(JSON.stringify({ type: 'pong', t: msg.t })); } catch (e) {} }
+}
+function onPong() {
+  // 手动“点击刷新”在等待本端 pong 回执：收到即判定正常
+  if (pendingCheck) {
+    clearTimeout(pendingCheck.timer); pendingCheck = null;
+    setBadge('已连接', 'on'); toast('连接正常 ✓');
+  }
+}
+// 顶部状态徽标点击：立即发送一次 ping 并在 3s 内等待 pong 回执
+function checkConnectionNow() {
+  if (!dc || dc.readyState !== 'open') { toast('尚未连接，无法检测'); return; }
+  markPeerActive(); // 重置，避免 beatTick 误判
+  setBadge('检测中…', 'pending');
+  if (pendingCheck) clearTimeout(pendingCheck.timer);
+  const timer = setTimeout(() => {
+    pendingCheck = null;
+    setBadge('连接异常', 'warn');
+    toast('对方无响应，连接可能已断开');
+  }, 3000);
+  pendingCheck = { timer };
+  try { dc.send(JSON.stringify({ type: 'ping', t: Date.now() })); }
+  catch (e) { clearTimeout(timer); pendingCheck = null; setBadge('连接异常', 'warn'); toast('发送探测失败'); }
 }
 
 // ---------- 消息分发 ----------
 function handleMessage(e) {
+  markPeerActive(); // 任意入站消息均证明对端存活（用于心跳探活）
   if (typeof e.data === 'string') {
     let msg; try { msg = JSON.parse(e.data); } catch (err) { return; }
     switch (msg.type) {
@@ -205,6 +262,8 @@ function handleMessage(e) {
       case 'screen-watch-info': onScreenWatchInfo(msg); break;
       case 'screen-crop': onScreenCrop(msg); break; // 发送端告知“正在/已停止 Canvas 裁切”，监看端据此切换显示
       case 'clipboard': onClipboard(msg); break;
+      case 'ping': onPing(msg); break;
+      case 'pong': onPong(msg); break;
     }
   } else {
     handleBinary(e.data);
